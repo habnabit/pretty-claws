@@ -1,0 +1,9 @@
+# © 2025 <_@habnab.it>
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+group_imports = "StdExternalCrate"
+format_strings = true
+imports_granularity = "Crate"
+overflow_delimited_expr = true
+unstable_features = true

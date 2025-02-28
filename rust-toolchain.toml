@@ -1,0 +1,6 @@
+# © 2025 <_@habnab.it>
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+[toolchain]
+channel = "nightly"

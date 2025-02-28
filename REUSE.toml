@@ -1,0 +1,14 @@
+version = 1
+
+[[annotations]]
+path = "**"
+SPDX-FileCopyrightText = "© 2025 <_@habnab.it>"
+SPDX-License-Identifier = "EUPL-1.2"
+
+[[annotations]]
+path = [
+    "**/Cargo.lock",
+    "fox-paws/assets/*",
+]
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC0-1.0"
