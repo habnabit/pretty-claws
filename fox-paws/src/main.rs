@@ -37,7 +37,13 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .init_resource::<SeededRng>()
         .add_plugins(WorldInspectorPlugin::new())
+        .register_type::<FoxClaw>()
+        .register_type::<FoxPaw>()
+        .register_type::<FoxPaws>()
+        .register_type::<FoxPawSlices>()
+        .register_type::<FoxPawsSpinNode>()
         .register_type::<SeededRng>()
+        .register_type::<UIBorders>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -87,6 +93,27 @@ struct FoxPaws {
     rotated: bool,
 }
 
+#[derive(Debug, Clone, Copy, Component, Reflect)]
+enum FoxPaw {
+    Left,
+    Right,
+}
+
+impl FoxPaw {
+    fn flip_x_p(&self) -> bool {
+        match self {
+            FoxPaw::Left => true,
+            FoxPaw::Right => false,
+        }
+    }
+}
+
+#[derive(Debug, Component, Reflect)]
+struct FoxClaw {
+    paw: FoxPaw,
+    digit: u8,
+}
+
 #[derive(Reflect, Debug, Component, Clone, Default)]
 struct FoxPawsSpinNode(Option<NodeIndex>);
 
@@ -106,7 +133,8 @@ fn spawn_fox_paws(
     let Ok(player) = q_player.get_single() else {
         return;
     };
-    let spawn = |parent: &mut ChildBuilder, flip_x, transform| {
+    let spawn = |parent: &mut ChildBuilder, paw: FoxPaw, transform| {
+        let flip_x = paw.flip_x_p();
         parent
             .spawn((
                 Sprite {
@@ -116,9 +144,10 @@ fn spawn_fox_paws(
                     ..Default::default()
                 },
                 transform,
+                paw,
             ))
             .with_children(|parent| {
-                for image in &slices.images[1..] {
+                for (e, image) in (&slices.images[1..]).into_iter().enumerate() {
                     parent.spawn((
                         Sprite {
                             image: image.clone(),
@@ -127,6 +156,10 @@ fn spawn_fox_paws(
                             ..Default::default()
                         },
                         Transform::from_xyz(0., 0., -1.),
+                        FoxClaw {
+                            paw,
+                            digit: (e as u8) + 1,
+                        },
                     ));
                 }
             });
@@ -143,8 +176,8 @@ fn spawn_fox_paws(
             InheritedVisibility::VISIBLE,
         ))
         .with_children(|parent| {
-            spawn(parent, true, Transform::from_xyz(-100., 0., 0.));
-            spawn(parent, false, Transform::from_xyz(100., 0., 0.));
+            spawn(parent, FoxPaw::Left, Transform::from_xyz(-100., 0., 0.));
+            spawn(parent, FoxPaw::Right, Transform::from_xyz(100., 0., 0.));
         });
 }
 
