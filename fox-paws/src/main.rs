@@ -14,11 +14,16 @@ use bevy::{
     input::common_conditions::input_just_pressed,
     prelude::*,
     ui::widget::NodeImageMode,
+    utils::hashbrown::HashMap,
     window::PrimaryWindow,
 };
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use petgraph::graph::NodeIndex;
-use rand::{distr::Distribution, seq::SliceRandom, Rng, SeedableRng};
+use rand::{
+    distr::{uniform::SampleRange, Distribution},
+    seq::{IndexedMutRandom, IndexedRandom, SliceRandom},
+    Rng, SeedableRng,
+};
 use rand_chacha::ChaCha8Rng;
 use uuid::Uuid;
 
@@ -48,7 +53,7 @@ fn main() {
             (
                 set_button_border,
                 state_button_clicked,
-                add_color_button_clicked,
+                pick_button_clicked,
                 remove_color_button_clicked,
                 place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
                 (spawn_ui, spawn_fox_paws, set_button_background)
@@ -387,8 +392,14 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
         });
 }
 
+#[derive(Reflect, Debug, Clone, Copy)]
+enum PickButtonAction {
+    AddColor,
+    Randomize,
+}
+
 #[derive(Reflect, Debug, Component, Clone)]
-struct AddColorButton;
+struct PickButton(PickButtonAction);
 
 #[derive(Reflect, Debug, Component, Clone)]
 struct RemoveColorButton(Entity);
@@ -405,26 +416,28 @@ fn show_pick_buttons(
         return;
     };
     commands.entity(area).with_children(|parent| {
-        parent
-            .spawn((
-                Button,
-                AddColorButton,
-                borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
-                Node {
-                    margin: UiRect::all(Val::Px(10.)),
-                    padding: UiRect::all(Val::Px(10.)),
-                    justify_content: JustifyContent::Center,
-                    align_items: AlignItems::Center,
-                    ..default()
-                },
-                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
-            ))
-            .with_children(|parent| {
-                parent.spawn((
-                    Text::new(format!("Add color")),
-                    TextColor(Color::hsl(0., 0., 0.1)),
-                ));
-            });
+        for &action in &[PickButtonAction::AddColor, PickButtonAction::Randomize] {
+            parent
+                .spawn((
+                    Button,
+                    PickButton(action),
+                    borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
+                    Node {
+                        margin: UiRect::horizontal(Val::Px(5.)).with_bottom(Val::Px(5.)),
+                        padding: UiRect::all(Val::Px(10.)),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                ))
+                .with_children(|parent| {
+                    parent.spawn((
+                        Text::new(format!("{action:?}")),
+                        TextColor(Color::hsl(0., 0., 0.1)),
+                    ));
+                });
+        }
         parent.spawn((
             Node {
                 flex_direction: FlexDirection::Column,
@@ -443,57 +456,104 @@ fn remove_pick_buttons(q_area: Query<Entity, With<StateNodeArea>>, mut commands:
     commands.entity(area).despawn_descendants();
 }
 
-fn add_color_button_clicked(
+#[derive(Reflect, Debug, Component, Clone)]
+struct SelectedColor {
+    selected: Color,
+}
+
+fn pick_random_color<R: Rng>(rng: &mut R) -> Color {
+    let hue_dist = rand::distr::Uniform::new(0., 360.).unwrap();
+    let saturation_dist = rand::distr::Uniform::new(0.5, 0.9).unwrap();
+    let lightness_dist = rand::distr::Uniform::new(0.7, 0.8).unwrap();
+    Color::hsl(
+        hue_dist.sample(rng),
+        saturation_dist.sample(rng),
+        lightness_dist.sample(rng),
+    )
+}
+
+fn pick_button_clicked(
     q_area: Query<Entity, With<ColorsNodeArea>>,
-    q_buttons: Query<&Interaction, (Changed<Interaction>, With<AddColorButton>)>,
+    q_buttons: Query<(&PickButton, &Interaction), Changed<Interaction>>,
+    q_colors: Query<(&SelectedColor, &Children)>,
+    mut q_claws: Query<&mut Sprite, With<FoxClaw>>,
+    mut q_text: Query<&mut Text>,
     borders: Res<UIBorders>,
+    mut rng: ResMut<SeededRng>,
     mut commands: Commands,
 ) {
     let Ok(area) = q_area.get_single() else {
         return;
     };
-    for &interaction in &q_buttons {
-        if let Interaction::Pressed = interaction {
-            commands.entity(area).with_children(|parent| {
-                parent
-                    .spawn(Node {
-                        ..Default::default()
-                    })
-                    .with_children(|parent| {
-                        let color_node = parent.parent_entity();
-                        parent
-                            .spawn(Node {
-                                width: Val::Percent(100.),
-                                ..Default::default()
-                            })
-                            .with_child((
-                                Text::new("new color"),
-                                TextColor(Color::hsl(0., 0., 0.1)),
-                            ));
-                        parent
-                            .spawn((
-                                Button,
-                                RemoveColorButton(color_node),
-                                borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
-                                Node {
-                                    margin: UiRect::all(Val::Px(3.)),
-                                    height: Val::Px(18.),
-                                    width: Val::Px(18.),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
-                            ))
-                            .with_children(|parent| {
-                                parent.spawn((
-                                    Text::new(format!("x")),
-                                    TextFont::from_font_size(13.),
-                                    TextColor(Color::hsl(0., 0., 0.1)),
-                                ));
-                            });
-                    });
-            });
+    for (button, &interaction) in &q_buttons {
+        if interaction != Interaction::Pressed {
+            continue;
+        }
+        match button.0 {
+            PickButtonAction::AddColor => {
+                commands.entity(area).with_children(|parent| {
+                    parent
+                        .spawn(Node {
+                            ..Default::default()
+                        })
+                        .with_children(|parent| {
+                            let color_node = parent.parent_entity();
+                            let color = pick_random_color(&mut rng.0);
+                            parent
+                                .spawn((
+                                    Node {
+                                        width: Val::Percent(100.),
+                                        ..Default::default()
+                                    },
+                                    SelectedColor { selected: color },
+                                    BackgroundColor(color),
+                                ))
+                                .with_child((Text::new("0"), TextColor(Color::hsl(0., 0., 0.1))));
+                            parent
+                                .spawn((
+                                    Button,
+                                    RemoveColorButton(color_node),
+                                    borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
+                                    Node {
+                                        margin: UiRect::all(Val::Px(3.)),
+                                        height: Val::Px(18.),
+                                        width: Val::Px(18.),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                                ))
+                                .with_children(|parent| {
+                                    parent.spawn((
+                                        Text::new("x"),
+                                        TextFont::from_font_size(13.),
+                                        TextColor(Color::hsl(0., 0., 0.1)),
+                                    ));
+                                });
+                        });
+                });
+            }
+            PickButtonAction::Randomize => {
+                let mut colors = q_colors
+                    .iter()
+                    .map(|(color, children)| (color, children, 0usize))
+                    .collect::<Vec<_>>();
+                if colors.is_empty() {
+                    return;
+                }
+                for mut sprite in &mut q_claws {
+                    let selection = colors.choose_mut(&mut rng.0).unwrap();
+                    sprite.color = selection.0.selected;
+                    selection.2 += 1;
+                }
+                for (_, children, count) in colors {
+                    let Ok(mut text) = q_text.get_mut(children[0]) else {
+                        continue;
+                    };
+                    **text = format!("{count}");
+                }
+            }
         }
     }
 }
