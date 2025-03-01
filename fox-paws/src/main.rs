@@ -37,6 +37,8 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .init_resource::<SeededRng>()
         .add_plugins(WorldInspectorPlugin::new())
+        .register_type::<Cubehelix>()
+        .register_type::<CubehelixAnimationNode>()
         .register_type::<FoxClaw>()
         .register_type::<FoxPaw>()
         .register_type::<FoxPaws>()
@@ -44,6 +46,7 @@ fn main() {
         .register_type::<FoxPawsSpinNode>()
         .register_type::<SeededRng>()
         .register_type::<UIBorders>()
+        .add_observer(animate_cubehelix)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -52,6 +55,7 @@ fn main() {
                 spawn_ui.run_if(run_once),
                 place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
                 spin_fox_paws.run_if(input_just_pressed(KeyCode::KeyS)),
+                update_cubehelix_color,
             ),
         )
         .run();
@@ -116,6 +120,16 @@ struct FoxClaw {
     digit: u8,
 }
 
+impl FoxClaw {
+    fn phase(&self) -> f32 {
+        let coeff = match self.paw {
+            FoxPaw::Left => 5 - self.digit,
+            FoxPaw::Right => 4 + self.digit,
+        };
+        coeff as f32 * 0.1
+    }
+}
+
 #[derive(Reflect, Debug, Component, Clone, Default)]
 struct FoxPawsSpinNode(Option<NodeIndex>);
 
@@ -150,6 +164,10 @@ fn spawn_fox_paws(
             ))
             .with_children(|parent| {
                 for (e, image) in (&slices.images[1..]).into_iter().enumerate() {
+                    let claw = FoxClaw {
+                        paw,
+                        digit: (e as u8) + 1,
+                    };
                     parent.spawn((
                         Sprite {
                             image: image.clone(),
@@ -158,10 +176,8 @@ fn spawn_fox_paws(
                             ..Default::default()
                         },
                         Transform::from_xyz(0., 0., -1.),
-                        FoxClaw {
-                            paw,
-                            digit: (e as u8) + 1,
-                        },
+                        CubehelixBundle::new(claw.phase(), player),
+                        claw,
                     ));
                 }
             });
@@ -268,6 +284,102 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
         },
         BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
     ));
+}
+
+#[derive(Debug, Clone, Default, Component, Reflect)]
+struct Cubehelix {
+    phase: f32,
+    value: f32,
+}
+
+fn update_cubehelix_color(mut q_claw: Query<(&mut Sprite, &Cubehelix), Changed<Cubehelix>>) {
+    for (mut sprite, cubehelix) in &mut q_claw {
+        let value = (cubehelix.phase + cubehelix.value) % 1.;
+        let mut h = (-100.).lerp(260., value);
+        if h < 0. {
+            h += 360.;
+        }
+        let s;
+        let l;
+        if value < 0.5 {
+            let value = value * 2.;
+            s = (0.75).lerp(1.5, value);
+            l = (0.35).lerp(0.8, value);
+        } else {
+            let value = (value - 0.5) * 2.;
+            s = (1.5).lerp(0.75, value);
+            l = (0.8).lerp(0.35, value);
+        }
+        sprite.color = Color::hsl(h, s, l);
+    }
+}
+
+#[derive(Reflect, Debug, Component, Clone, Default)]
+struct CubehelixAnimationNode(Option<NodeIndex>);
+
+impl SavedAnimationNode for CubehelixAnimationNode {
+    type AnimatedFrom = Cubehelix;
+
+    fn node_mut(&mut self) -> &mut Option<NodeIndex> {
+        &mut self.0
+    }
+}
+
+fn animate_cubehelix(
+    ev: Trigger<OnInsert, Cubehelix>,
+    q_can_animate: Query<&AnimationTarget, With<Cubehelix>>,
+    mut commands: Commands,
+) {
+    let Ok(_) = q_can_animate.get(ev.entity()) else {
+        return;
+    };
+    AnimatorPlugin::<CubehelixAnimationNode>::start_animation(
+        &mut commands,
+        ev.entity(),
+        RepeatAnimation::Forever,
+        move |_, target| {
+            let mut clip = AnimationClip::default();
+            clip.add_curve_to_target(
+                target,
+                AnimatableCurve::new(
+                    animated_field!(Cubehelix::value),
+                    EasingCurve::new(0., 1., EaseFunction::Linear)
+                        .reparametrize_linear(interval(0., 5.0).unwrap())
+                        .unwrap(),
+                ),
+            );
+            clip
+        },
+    );
+}
+
+#[derive(Bundle)]
+struct CubehelixBundle {
+    cubehelix: Cubehelix,
+    target: AnimationTarget,
+    tracker: CubehelixAnimationNode,
+}
+
+impl CubehelixBundle {
+    fn new(phase: f32, player: Entity) -> Self {
+        CubehelixBundle {
+            cubehelix: Cubehelix {
+                phase,
+                ..Default::default()
+            },
+            target: AnimationTarget {
+                id: AnimationTargetId(Uuid::new_v4()),
+                player,
+            },
+            tracker: Default::default(),
+        }
+    }
+}
+
+impl Default for CubehelixBundle {
+    fn default() -> Self {
+        CubehelixBundle::new(0., Entity::PLACEHOLDER)
+    }
 }
 
 fn setup(
