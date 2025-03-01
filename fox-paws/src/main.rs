@@ -387,96 +387,6 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
         });
 }
 
-#[derive(Debug, Clone, Default, Component, Reflect)]
-struct CubehelixRoot {
-    value: f32,
-}
-
-#[derive(Debug, Clone, Default, Component, Reflect)]
-struct CubehelixClaw {
-    phase: f32,
-    color: Color,
-}
-
-fn update_cubehelix_color(
-    q_color_root: Query<&CubehelixRoot, Changed<CubehelixRoot>>,
-    mut q_claw: Query<(&mut Sprite, &mut CubehelixClaw)>,
-) {
-    let Ok(color_root) = q_color_root.get_single() else {
-        return;
-    };
-    for (mut sprite, mut cubehelix) in &mut q_claw {
-        let value = ((*color_root).value + cubehelix.phase) % 1.;
-        let mut h = (-100.).lerp(260., value);
-        if h < 0. {
-            h += 360.;
-        }
-        let half_value = if value < 0.5 {
-            value * 2.
-        } else {
-            -(value - 1.) * 2.
-        };
-        let s = (0.375).lerp(0.75, half_value);
-        let l = (0.35).lerp(0.8, half_value);
-        cubehelix.color = Color::hsl(h, s, l);
-        sprite.color = cubehelix.color;
-    }
-}
-
-#[derive(Reflect, Debug, Component, Clone, Default)]
-struct CubehelixAnimationNode(Option<NodeIndex>);
-
-impl SavedAnimationNode for CubehelixAnimationNode {
-    type AnimatedFrom = CubehelixRoot;
-
-    fn node_mut(&mut self) -> &mut Option<NodeIndex> {
-        &mut self.0
-    }
-}
-
-fn animate_cubehelix(
-    ev: Trigger<OnInsert, CubehelixRoot>,
-    q_can_animate: Query<&AnimationTarget, With<CubehelixRoot>>,
-    mut commands: Commands,
-) {
-    let Ok(_) = q_can_animate.get(ev.entity()) else {
-        return;
-    };
-    AnimatorPlugin::<CubehelixAnimationNode>::start_animation(
-        &mut commands,
-        ev.entity(),
-        RepeatAnimation::Forever,
-        move |_, target| {
-            let mut clip = AnimationClip::default();
-            clip.add_curve_to_target(
-                target,
-                AnimatableCurve::new(
-                    animated_field!(CubehelixRoot::value),
-                    EasingCurve::new(0., 1., EaseFunction::Linear)
-                        .reparametrize_linear(interval(0., 5.0).unwrap())
-                        .unwrap(),
-                ),
-            );
-            clip
-        },
-    );
-}
-
-fn apply_cubehelix(q_claws: Query<(Entity, &FoxClaw)>, mut commands: Commands) {
-    for (entity, claw) in &q_claws {
-        commands.entity(entity).insert(CubehelixClaw {
-            phase: claw.phase(),
-            ..Default::default()
-        });
-    }
-}
-
-fn remove_cubehelix(q_claws: Query<Entity, With<CubehelixClaw>>, mut commands: Commands) {
-    for entity in &q_claws {
-        commands.entity(entity).remove::<CubehelixClaw>();
-    }
-}
-
 #[derive(Reflect, Debug, Component, Clone)]
 struct AddColorButton;
 
@@ -596,6 +506,96 @@ fn remove_color_button_clicked(
         if let Interaction::Pressed = interaction {
             commands.entity(button.0).despawn_recursive();
         }
+    }
+}
+
+#[derive(Debug, Clone, Default, Component, Reflect)]
+struct CubehelixRoot {
+    value: f32,
+}
+
+#[derive(Debug, Clone, Default, Component, Reflect)]
+struct CubehelixClaw {
+    phase: f32,
+    color: Color,
+}
+
+fn update_cubehelix_color(
+    q_color_root: Query<&CubehelixRoot, Changed<CubehelixRoot>>,
+    mut q_claw: Query<(&mut Sprite, &mut CubehelixClaw)>,
+) {
+    let Ok(color_root) = q_color_root.get_single() else {
+        return;
+    };
+    for (mut sprite, mut cubehelix) in &mut q_claw {
+        let value = ((*color_root).value + cubehelix.phase) % 1.;
+        let mut h = (-100.).lerp(260., value);
+        if h < 0. {
+            h += 360.;
+        }
+        let half_value = if value < 0.5 {
+            value * 2.
+        } else {
+            -(value - 1.) * 2.
+        };
+        let s = (0.375).lerp(0.75, half_value);
+        let l = (0.35).lerp(0.8, half_value);
+        cubehelix.color = Color::hsl(h, s, l);
+        sprite.color = cubehelix.color;
+    }
+}
+
+#[derive(Reflect, Debug, Component, Clone, Default)]
+struct CubehelixAnimationNode(Option<NodeIndex>);
+
+impl SavedAnimationNode for CubehelixAnimationNode {
+    type AnimatedFrom = CubehelixRoot;
+
+    fn node_mut(&mut self) -> &mut Option<NodeIndex> {
+        &mut self.0
+    }
+}
+
+fn animate_cubehelix(
+    ev: Trigger<OnInsert, CubehelixRoot>,
+    q_can_animate: Query<&AnimationTarget, With<CubehelixRoot>>,
+    mut commands: Commands,
+) {
+    let Ok(_) = q_can_animate.get(ev.entity()) else {
+        return;
+    };
+    AnimatorPlugin::<CubehelixAnimationNode>::start_animation(
+        &mut commands,
+        ev.entity(),
+        RepeatAnimation::Forever,
+        move |_, target| {
+            let mut clip = AnimationClip::default();
+            clip.add_curve_to_target(
+                target,
+                AnimatableCurve::new(
+                    animated_field!(CubehelixRoot::value),
+                    EasingCurve::new(0., 1., EaseFunction::Linear)
+                        .reparametrize_linear(interval(0., 5.0).unwrap())
+                        .unwrap(),
+                ),
+            );
+            clip
+        },
+    );
+}
+
+fn apply_cubehelix(q_claws: Query<(Entity, &FoxClaw)>, mut commands: Commands) {
+    for (entity, claw) in &q_claws {
+        commands.entity(entity).insert(CubehelixClaw {
+            phase: claw.phase(),
+            ..Default::default()
+        });
+    }
+}
+
+fn remove_cubehelix(q_claws: Query<Entity, With<CubehelixClaw>>, mut commands: Commands) {
+    for entity in &q_claws {
+        commands.entity(entity).remove::<CubehelixClaw>();
     }
 }
 
