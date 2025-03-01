@@ -45,7 +45,8 @@ fn main() {
         .add_systems(
             Update,
             (
-                button_system,
+                set_button_border,
+                state_button_clicked,
                 place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
                 (spawn_ui, spawn_fox_paws, set_button_background)
                     .chain()
@@ -298,23 +299,27 @@ fn set_button_background(
     }
 }
 
-fn button_system(
-    mut q_buttons: Query<
-        (&Interaction, &ColorStateButton, &mut ImageNode),
-        (Changed<Interaction>, With<Button>),
-    >,
-    mut next_color_state: ResMut<NextState<ColorState>>,
+fn set_button_border(
+    mut q_buttons: Query<(&Interaction, &mut ImageNode), (Changed<Interaction>, With<Button>)>,
 ) {
-    for (interaction, button, mut image) in &mut q_buttons {
-        let color = match *interaction {
-            Interaction::Pressed => {
-                next_color_state.set(button.0);
-                Color::hsl(300., 1., 0.65)
-            }
+    for (&interaction, mut image) in &mut q_buttons {
+        let color = match interaction {
+            Interaction::Pressed => Color::hsl(300., 1., 0.65),
             Interaction::Hovered => Color::hsl(330., 1., 0.55),
             Interaction::None => Color::hsl(330., 1., 0.2),
         };
         image.color = color;
+    }
+}
+
+fn state_button_clicked(
+    q_buttons: Query<(&Interaction, &ColorStateButton), (Changed<Interaction>, With<Button>)>,
+    mut next_color_state: ResMut<NextState<ColorState>>,
+) {
+    for (&interaction, button) in &q_buttons {
+        if let Interaction::Pressed = interaction {
+            next_color_state.set(button.0);
+        }
     }
 }
 
