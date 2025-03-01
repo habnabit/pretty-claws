@@ -13,6 +13,7 @@ use bevy::{
     animation::{animated_field, AnimationTarget, AnimationTargetId, RepeatAnimation},
     input::common_conditions::input_just_pressed,
     prelude::*,
+    ui::widget::NodeImageMode,
     window::PrimaryWindow,
 };
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
@@ -22,10 +23,13 @@ use rand_chacha::ChaCha8Rng;
 use uuid::Uuid;
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
+    let mut app = App::new();
+
+    app.add_plugins(DefaultPlugins)
         .init_resource::<SeededRng>()
-        .add_plugins(WorldInspectorPlugin::new())
+        .init_state::<ColorState>()
+        // .add_plugins(WorldInspectorPlugin::new())
+        .register_type::<ColorState>()
         .register_type::<CubehelixClaw>()
         .register_type::<CubehelixRoot>()
         .register_type::<CubehelixAnimationNode>()
@@ -41,14 +45,21 @@ fn main() {
         .add_systems(
             Update,
             (
-                spawn_fox_paws.run_if(run_once),
-                spawn_ui.run_if(run_once),
+                button_system,
                 place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
+                (spawn_ui, spawn_fox_paws, set_button_background)
+                    .chain()
+                    .run_if(run_once),
                 spin_fox_paws.run_if(input_just_pressed(KeyCode::KeyS)),
                 update_cubehelix_color,
             ),
-        )
-        .run();
+        );
+
+    for &state in &[ColorState::Rainbow, ColorState::Pick] {
+        app.add_systems(OnEnter(state), set_button_background);
+    }
+
+    app.run();
 }
 
 #[derive(Resource, Reflect)]
@@ -255,28 +266,115 @@ struct UIBorders {
 }
 
 impl UIBorders {
-    fn make_sprite(&self, index: usize, color: Color) -> Sprite {
-        let mut sprite = Sprite::from_atlas_image(self.texture.clone(), TextureAtlas {
+    fn make_sprite(&self, index: usize, color: Color) -> ImageNode {
+        ImageNode::from_atlas_image(self.texture.clone(), TextureAtlas {
             index,
             layout: self.atlas_layout.clone(),
-        });
-        sprite.color = color;
-        sprite.image_mode = SpriteImageMode::Sliced(self.slicer.clone());
-        sprite
+        })
+        .with_color(color)
+        .with_mode(NodeImageMode::Sliced(self.slicer.clone()))
+    }
+}
+
+#[derive(States, Reflect, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum ColorState {
+    #[default]
+    Rainbow,
+    Pick,
+}
+
+#[derive(Reflect, Debug, Component, Clone)]
+struct ColorStateButton(ColorState);
+
+fn set_button_background(
+    mut q_buttons: Query<(&ColorStateButton, &mut BackgroundColor), With<Button>>,
+    color_state: Res<State<ColorState>>,
+) {
+    for (button, mut bg) in &mut q_buttons {
+        let color = if color_state.get() == &button.0 {
+            Color::hsla(330., 0.8, 0.9, 0.8)
+        } else {
+            Color::hsla(0., 0., 0.7, 0.8)
+        };
+        bg.0 = color;
+    }
+}
+
+fn button_system(
+    mut q_buttons: Query<
+        (&Interaction, &ColorStateButton, &mut ImageNode),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut next_color_state: ResMut<NextState<ColorState>>,
+) {
+    for (interaction, button, mut image) in &mut q_buttons {
+        let color = match *interaction {
+            Interaction::Pressed => {
+                next_color_state.set(button.0);
+                Color::hsl(300., 1., 0.65)
+            }
+            Interaction::Hovered => Color::hsl(330., 1., 0.55),
+            Interaction::None => Color::hsl(330., 1., 0.2),
+        };
+        image.color = color;
     }
 }
 
 fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
-    commands.spawn((
-        Node {
-            top: Val::Px(0.),
-            left: Val::Px(0.),
-            height: Val::Percent(100.),
-            width: Val::Vw(33.),
-            ..Default::default()
-        },
-        BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
-    ));
+    commands
+        .spawn((
+            Node {
+                top: Val::Px(0.),
+                left: Val::Px(0.),
+                height: Val::Percent(100.),
+                width: Val::Vw(33.),
+                display: Display::Grid,
+                grid_template_rows: vec![GridTrack::min_content(), GridTrack::flex(1.0)],
+                grid_template_columns: vec![GridTrack::auto()],
+                ..Default::default()
+            },
+            BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+        ))
+        .with_children(|parent| {
+            parent
+                .spawn((Node {
+                    ..Default::default()
+                },))
+                .with_children(|parent| {
+                    for &state in &[ColorState::Rainbow, ColorState::Pick] {
+                        parent
+                            .spawn((
+                                ColorStateButton(state),
+                                Button,
+                                borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
+                                Node {
+                                    width: Val::Percent(100.),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    margin: UiRect::all(Val::Px(10.)),
+                                    padding: UiRect::all(Val::Px(10.)),
+                                    ..default()
+                                },
+                                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                            ))
+                            .with_children(|parent| {
+                                parent.spawn((
+                                    Text::new(format!("{state:?}")),
+                                    TextColor(Color::hsl(0., 0., 0.1)),
+                                ));
+                            });
+                    }
+                });
+            parent
+                .spawn((
+                    Node {
+                        // width: Val::Percent(100.),
+                        ..Default::default()
+                    },
+                    // BackgroundColor(Color::hsla(120., 1., 0.5, 0.8)),
+                ))
+                .with_child(Text::new("text"));
+        });
 }
 
 #[derive(Debug, Clone, Default, Component, Reflect)]
@@ -407,8 +505,13 @@ fn setup(
 
     commands.insert_resource({
         let texture = asset_server.load("fantasy_ui_border_sheet.png");
-        let atlas_layout =
-            TextureAtlasLayout::from_grid(UVec2::new(50, 50), 6, 6, Some(UVec2::splat(2)), None);
+        let atlas_layout = TextureAtlasLayout::from_grid(
+            UVec2::splat(48),
+            6,
+            6,
+            Some(UVec2::splat(4)),
+            Some(UVec2::splat(2)),
+        );
         let atlas_layout = texture_atlases.add(atlas_layout);
         let slicer = TextureSlicer {
             border: BorderRect::square(24.0),
