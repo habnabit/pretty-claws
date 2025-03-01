@@ -49,6 +49,8 @@ fn main() {
             Update,
             (
                 spawn_fox_paws.run_if(run_once),
+                spawn_ui.run_if(run_once),
+                place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
                 spin_fox_paws.run_if(input_just_pressed(KeyCode::KeyS)),
             ),
         )
@@ -181,6 +183,31 @@ fn spawn_fox_paws(
         });
 }
 
+fn place_fox_paws(
+    mut q_paws: Query<&mut Transform, With<FoxPaws>>,
+    q_camera: Query<&Camera, Changed<Camera>>,
+) {
+    let Ok(camera) = q_camera.get_single() else {
+        return;
+    };
+    let Some(viewport) = camera.logical_viewport_rect() else {
+        return;
+    };
+    let Ok(mut paws) = q_paws.get_single_mut() else {
+        return;
+    };
+    let paws_box_inset = viewport.width() / 3.;
+    let paws_rect = Rect::new(
+        viewport.min.x + paws_box_inset,
+        viewport.min.y,
+        viewport.max.x,
+        viewport.max.y,
+    );
+    let paws_loc = paws_rect.center() - viewport.center();
+    paws.translation.x = paws_loc.x;
+    paws.translation.y = paws_loc.y;
+}
+
 fn spin_fox_paws(
     mut q_paws: Query<(Entity, &mut FoxPaws), With<AnimationTarget>>,
     mut commands: Commands,
@@ -228,6 +255,19 @@ impl UIBorders {
         sprite.image_mode = SpriteImageMode::Sliced(self.slicer.clone());
         sprite
     }
+}
+
+fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
+    commands.spawn((
+        Node {
+            top: Val::Px(0.),
+            left: Val::Px(0.),
+            height: Val::Percent(100.),
+            width: Val::Vw(33.),
+            ..Default::default()
+        },
+        BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+    ));
 }
 
 fn setup(
