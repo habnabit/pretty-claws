@@ -39,6 +39,7 @@ fn main() {
         .register_type::<FoxPawSlices>()
         .register_type::<FoxPawsSpinNode>()
         .register_type::<SeededRng>()
+        .register_type::<StateNodeArea>()
         .register_type::<UIBorders>()
         .add_observer(animate_cubehelix)
         .add_systems(Startup, setup)
@@ -47,6 +48,8 @@ fn main() {
             (
                 set_button_border,
                 state_button_clicked,
+                add_color_button_clicked,
+                remove_color_button_clicked,
                 place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
                 (spawn_ui, spawn_fox_paws, set_button_background)
                     .chain()
@@ -56,7 +59,9 @@ fn main() {
             ),
         )
         .add_systems(OnEnter(ColorState::Rainbow), apply_cubehelix)
-        .add_systems(OnExit(ColorState::Rainbow), remove_cubehelix);
+        .add_systems(OnExit(ColorState::Rainbow), remove_cubehelix)
+        .add_systems(OnEnter(ColorState::Pick), show_pick_buttons)
+        .add_systems(OnExit(ColorState::Pick), remove_pick_buttons);
 
     for &state in &[ColorState::Rainbow, ColorState::Pick] {
         app.add_systems(OnEnter(state), set_button_background);
@@ -323,6 +328,9 @@ fn state_button_clicked(
     }
 }
 
+#[derive(Reflect, Debug, Component, Clone)]
+struct StateNodeArea;
+
 fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
     commands.set_state(ColorState::Rainbow);
     commands
@@ -369,15 +377,13 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
                             });
                     }
                 });
-            parent
-                .spawn((
-                    Node {
-                        // width: Val::Percent(100.),
-                        ..Default::default()
-                    },
-                    // BackgroundColor(Color::hsla(120., 1., 0.5, 0.8)),
-                ))
-                .with_child(Text::new("text"));
+            parent.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    ..Default::default()
+                },
+                StateNodeArea,
+            ));
         });
 }
 
@@ -468,6 +474,128 @@ fn apply_cubehelix(q_claws: Query<(Entity, &FoxClaw)>, mut commands: Commands) {
 fn remove_cubehelix(q_claws: Query<Entity, With<CubehelixClaw>>, mut commands: Commands) {
     for entity in &q_claws {
         commands.entity(entity).remove::<CubehelixClaw>();
+    }
+}
+
+#[derive(Reflect, Debug, Component, Clone)]
+struct AddColorButton;
+
+#[derive(Reflect, Debug, Component, Clone)]
+struct RemoveColorButton(Entity);
+
+#[derive(Reflect, Debug, Component, Clone)]
+struct ColorsNodeArea;
+
+fn show_pick_buttons(
+    q_area: Query<Entity, With<StateNodeArea>>,
+    borders: Res<UIBorders>,
+    mut commands: Commands,
+) {
+    let Ok(area) = q_area.get_single() else {
+        return;
+    };
+    commands.entity(area).with_children(|parent| {
+        parent
+            .spawn((
+                Button,
+                AddColorButton,
+                borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
+                Node {
+                    margin: UiRect::all(Val::Px(10.)),
+                    padding: UiRect::all(Val::Px(10.)),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    Text::new(format!("Add color")),
+                    TextColor(Color::hsl(0., 0., 0.1)),
+                ));
+            });
+        parent.spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                margin: UiRect::horizontal(Val::Px(13.)),
+                ..Default::default()
+            },
+            ColorsNodeArea,
+        ));
+    });
+}
+
+fn remove_pick_buttons(q_area: Query<Entity, With<StateNodeArea>>, mut commands: Commands) {
+    let Ok(area) = q_area.get_single() else {
+        return;
+    };
+    commands.entity(area).despawn_descendants();
+}
+
+fn add_color_button_clicked(
+    q_area: Query<Entity, With<ColorsNodeArea>>,
+    q_buttons: Query<&Interaction, (Changed<Interaction>, With<AddColorButton>)>,
+    borders: Res<UIBorders>,
+    mut commands: Commands,
+) {
+    let Ok(area) = q_area.get_single() else {
+        return;
+    };
+    for &interaction in &q_buttons {
+        if let Interaction::Pressed = interaction {
+            commands.entity(area).with_children(|parent| {
+                parent
+                    .spawn(Node {
+                        ..Default::default()
+                    })
+                    .with_children(|parent| {
+                        let color_node = parent.parent_entity();
+                        parent
+                            .spawn(Node {
+                                width: Val::Percent(100.),
+                                ..Default::default()
+                            })
+                            .with_child((
+                                Text::new("new color"),
+                                TextColor(Color::hsl(0., 0., 0.1)),
+                            ));
+                        parent
+                            .spawn((
+                                Button,
+                                RemoveColorButton(color_node),
+                                borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
+                                Node {
+                                    margin: UiRect::all(Val::Px(3.)),
+                                    height: Val::Px(18.),
+                                    width: Val::Px(18.),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                            ))
+                            .with_children(|parent| {
+                                parent.spawn((
+                                    Text::new(format!("x")),
+                                    TextFont::from_font_size(13.),
+                                    TextColor(Color::hsl(0., 0., 0.1)),
+                                ));
+                            });
+                    });
+            });
+        }
+    }
+}
+
+fn remove_color_button_clicked(
+    q_buttons: Query<(&RemoveColorButton, &Interaction), Changed<Interaction>>,
+    mut commands: Commands,
+) {
+    for (button, &interaction) in &q_buttons {
+        if let Interaction::Pressed = interaction {
+            commands.entity(button.0).despawn_recursive();
+        }
     }
 }
 
