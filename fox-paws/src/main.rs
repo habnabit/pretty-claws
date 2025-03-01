@@ -166,7 +166,7 @@ fn spawn_fox_paws(
                     image: slices.images[0].clone(),
                     flip_x,
                     custom_size: Some(FOX_PAW_SIZE),
-                    ..Default::default()
+                    ..default()
                 },
                 transform,
                 paw,
@@ -178,7 +178,7 @@ fn spawn_fox_paws(
                             image: image.clone(),
                             flip_x,
                             custom_size: Some(FOX_PAW_SIZE),
-                            ..Default::default()
+                            ..default()
                         },
                         Transform::from_xyz(0., 0., -1.),
                         FoxClaw {
@@ -343,15 +343,13 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
                 display: Display::Grid,
                 grid_template_rows: vec![GridTrack::min_content(), GridTrack::flex(1.0)],
                 grid_template_columns: vec![GridTrack::auto()],
-                ..Default::default()
+                ..default()
             },
             BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
         ))
         .with_children(|parent| {
             parent
-                .spawn((Node {
-                    ..Default::default()
-                },))
+                .spawn((Node { ..default() },))
                 .with_children(|parent| {
                     for &state in &[ColorState::Rainbow, ColorState::Pick] {
                         parent
@@ -380,7 +378,7 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
             parent.spawn((
                 Node {
                     flex_direction: FlexDirection::Column,
-                    ..Default::default()
+                    ..default()
                 },
                 StateNodeArea,
             ));
@@ -437,7 +435,7 @@ fn show_pick_buttons(
             Node {
                 flex_direction: FlexDirection::Column,
                 margin: UiRect::horizontal(Val::Px(13.)),
-                ..Default::default()
+                ..default()
             },
             ColorsNodeArea,
         ));
@@ -487,46 +485,45 @@ fn pick_button_clicked(
         match button.0 {
             PickButtonAction::AddColor => {
                 commands.entity(area).with_children(|parent| {
-                    parent
-                        .spawn(Node {
-                            ..Default::default()
-                        })
-                        .with_children(|parent| {
-                            let color_node = parent.parent_entity();
-                            let color = pick_random_color(&mut rng.0);
-                            parent
-                                .spawn((
-                                    Node {
-                                        width: Val::Percent(100.),
-                                        ..Default::default()
-                                    },
-                                    SelectedColor { selected: color },
-                                    BackgroundColor(color),
-                                ))
-                                .with_child((Text::new("0"), TextColor(Color::hsl(0., 0., 0.1))));
-                            parent
-                                .spawn((
-                                    Button,
-                                    RemoveColorButton(color_node),
-                                    borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
-                                    Node {
-                                        margin: UiRect::all(Val::Px(3.)),
-                                        height: Val::Px(18.),
-                                        width: Val::Px(18.),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        ..default()
-                                    },
-                                    BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
-                                ))
-                                .with_children(|parent| {
-                                    parent.spawn((
-                                        Text::new("x"),
-                                        TextFont::from_font_size(13.),
-                                        TextColor(Color::hsl(0., 0., 0.1)),
-                                    ));
-                                });
-                        });
+                    parent.spawn(Node { ..default() }).with_children(|parent| {
+                        let color_node = parent.parent_entity();
+                        let color = pick_random_color(&mut rng.0);
+                        parent
+                            .spawn((
+                                Node {
+                                    width: Val::Percent(100.),
+                                    margin: UiRect::all(Val::Px(2.)),
+                                    padding: UiRect::all(Val::Px(2.)).with_left(Val::Px(5.)),
+                                    ..default()
+                                },
+                                SelectedColor { selected: color },
+                                BackgroundColor(color),
+                            ))
+                            .with_child((Text::new("0"), TextColor(Color::hsl(0., 0., 0.1))));
+                        parent
+                            .spawn((
+                                Button,
+                                RemoveColorButton(color_node),
+                                borders.make_sprite(1, Color::hsl(330., 1., 0.2)),
+                                Node {
+                                    // height: Val::Percent(100.),
+                                    // height: Val::Px(23.),
+                                    width: Val::Px(23.),
+                                    margin: UiRect::all(Val::Px(2.)),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },
+                                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                            ))
+                            .with_children(|parent| {
+                                parent.spawn((
+                                    Text::new("x"),
+                                    TextFont::from_font_size(14.),
+                                    TextColor(Color::hsl(0., 0., 0.1)),
+                                ));
+                            });
+                    });
                 });
             }
             PickButtonAction::Randomize => {
@@ -643,7 +640,7 @@ fn apply_cubehelix(q_claws: Query<(Entity, &FoxClaw)>, mut commands: Commands) {
     for (entity, claw) in &q_claws {
         commands.entity(entity).insert(CubehelixClaw {
             phase: claw.phase(),
-            ..Default::default()
+            ..default()
         });
     }
 }
