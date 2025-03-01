@@ -126,7 +126,7 @@ impl FoxClaw {
             FoxPaw::Left => 5 - self.digit,
             FoxPaw::Right => 4 + self.digit,
         };
-        coeff as f32 * 0.1
+        coeff as f32 / 10.
     }
 }
 
@@ -299,17 +299,13 @@ fn update_cubehelix_color(mut q_claw: Query<(&mut Sprite, &Cubehelix), Changed<C
         if h < 0. {
             h += 360.;
         }
-        let s;
-        let l;
-        if value < 0.5 {
-            let value = value * 2.;
-            s = (0.75).lerp(1.5, value);
-            l = (0.35).lerp(0.8, value);
+        let half_value = if value < 0.5 {
+            value * 2.
         } else {
-            let value = (value - 0.5) * 2.;
-            s = (1.5).lerp(0.75, value);
-            l = (0.8).lerp(0.35, value);
-        }
+            -(value - 1.) * 2.
+        };
+        let s = (0.375).lerp(0.75, half_value);
+        let l = (0.35).lerp(0.8, half_value);
         sprite.color = Color::hsl(h, s, l);
     }
 }
