@@ -53,7 +53,9 @@ fn main() {
                 spin_fox_paws.run_if(input_just_pressed(KeyCode::KeyS)),
                 update_cubehelix_color,
             ),
-        );
+        )
+        .add_systems(OnEnter(ColorState::Rainbow), apply_cubehelix)
+        .add_systems(OnExit(ColorState::Rainbow), remove_cubehelix);
 
     for &state in &[ColorState::Rainbow, ColorState::Pick] {
         app.add_systems(OnEnter(state), set_button_background);
@@ -165,10 +167,6 @@ fn spawn_fox_paws(
             ))
             .with_children(|parent| {
                 for (e, image) in (&slices.images[1..]).into_iter().enumerate() {
-                    let claw = FoxClaw {
-                        paw,
-                        digit: (e as u8) + 1,
-                    };
                     parent.spawn((
                         Sprite {
                             image: image.clone(),
@@ -177,11 +175,10 @@ fn spawn_fox_paws(
                             ..Default::default()
                         },
                         Transform::from_xyz(0., 0., -1.),
-                        CubehelixClaw {
-                            phase: claw.phase(),
-                            ..Default::default()
+                        FoxClaw {
+                            paw,
+                            digit: (e as u8) + 1,
                         },
-                        claw,
                     ));
                 }
             });
@@ -279,6 +276,7 @@ impl UIBorders {
 #[derive(States, Reflect, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ColorState {
     #[default]
+    Init,
     Rainbow,
     Pick,
 }
@@ -321,6 +319,7 @@ fn button_system(
 }
 
 fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
+    commands.set_state(ColorState::Rainbow);
     commands
         .spawn((
             Node {
@@ -450,6 +449,21 @@ fn animate_cubehelix(
             clip
         },
     );
+}
+
+fn apply_cubehelix(q_claws: Query<(Entity, &FoxClaw)>, mut commands: Commands) {
+    for (entity, claw) in &q_claws {
+        commands.entity(entity).insert(CubehelixClaw {
+            phase: claw.phase(),
+            ..Default::default()
+        });
+    }
+}
+
+fn remove_cubehelix(q_claws: Query<Entity, With<CubehelixClaw>>, mut commands: Commands) {
+    for entity in &q_claws {
+        commands.entity(entity).remove::<CubehelixClaw>();
+    }
 }
 
 #[derive(Bundle)]
