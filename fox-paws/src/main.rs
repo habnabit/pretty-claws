@@ -6,19 +6,13 @@
 
 mod animation;
 
-use std::{any::TypeId, cell::LazyCell, f32::consts::PI, time::Duration};
+use std::f32::consts::PI;
 
 use animation::{AnimatorPlugin, SavedAnimationNode};
 use bevy::{
-    animation::{
-        animated_field, AnimationEntityMut, AnimationEvaluationError, AnimationTarget,
-        AnimationTargetId, RepeatAnimation,
-    },
-    color::palettes::css,
+    animation::{animated_field, AnimationTarget, AnimationTargetId, RepeatAnimation},
     input::common_conditions::input_just_pressed,
     prelude::*,
-    sprite::Anchor,
-    utils::hashbrown::{HashMap, HashSet},
     window::PrimaryWindow,
 };
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
@@ -27,17 +21,13 @@ use rand::{distr::Distribution, seq::SliceRandom, Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use uuid::Uuid;
 
-const NO_PICK: PickingBehavior = PickingBehavior {
-    should_block_lower: false,
-    is_hoverable: false,
-};
-
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .init_resource::<SeededRng>()
         .add_plugins(WorldInspectorPlugin::new())
-        .register_type::<Cubehelix>()
+        .register_type::<CubehelixClaw>()
+        .register_type::<CubehelixRoot>()
         .register_type::<CubehelixAnimationNode>()
         .register_type::<FoxClaw>()
         .register_type::<FoxPaw>()
@@ -176,7 +166,10 @@ fn spawn_fox_paws(
                             ..Default::default()
                         },
                         Transform::from_xyz(0., 0., -1.),
-                        CubehelixBundle::new(claw.phase(), player),
+                        CubehelixClaw {
+                            phase: claw.phase(),
+                            ..Default::default()
+                        },
                         claw,
                     ));
                 }
@@ -287,14 +280,25 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
 }
 
 #[derive(Debug, Clone, Default, Component, Reflect)]
-struct Cubehelix {
-    phase: f32,
+struct CubehelixRoot {
     value: f32,
 }
 
-fn update_cubehelix_color(mut q_claw: Query<(&mut Sprite, &Cubehelix), Changed<Cubehelix>>) {
-    for (mut sprite, cubehelix) in &mut q_claw {
-        let value = (cubehelix.phase + cubehelix.value) % 1.;
+#[derive(Debug, Clone, Default, Component, Reflect)]
+struct CubehelixClaw {
+    phase: f32,
+    color: Color,
+}
+
+fn update_cubehelix_color(
+    q_color_root: Query<&CubehelixRoot, Changed<CubehelixRoot>>,
+    mut q_claw: Query<(&mut Sprite, &mut CubehelixClaw)>,
+) {
+    let Ok(color_root) = q_color_root.get_single() else {
+        return;
+    };
+    for (mut sprite, mut cubehelix) in &mut q_claw {
+        let value = ((*color_root).value + cubehelix.phase) % 1.;
         let mut h = (-100.).lerp(260., value);
         if h < 0. {
             h += 360.;
@@ -306,7 +310,8 @@ fn update_cubehelix_color(mut q_claw: Query<(&mut Sprite, &Cubehelix), Changed<C
         };
         let s = (0.375).lerp(0.75, half_value);
         let l = (0.35).lerp(0.8, half_value);
-        sprite.color = Color::hsl(h, s, l);
+        cubehelix.color = Color::hsl(h, s, l);
+        sprite.color = cubehelix.color;
     }
 }
 
@@ -314,7 +319,7 @@ fn update_cubehelix_color(mut q_claw: Query<(&mut Sprite, &Cubehelix), Changed<C
 struct CubehelixAnimationNode(Option<NodeIndex>);
 
 impl SavedAnimationNode for CubehelixAnimationNode {
-    type AnimatedFrom = Cubehelix;
+    type AnimatedFrom = CubehelixRoot;
 
     fn node_mut(&mut self) -> &mut Option<NodeIndex> {
         &mut self.0
@@ -322,8 +327,8 @@ impl SavedAnimationNode for CubehelixAnimationNode {
 }
 
 fn animate_cubehelix(
-    ev: Trigger<OnInsert, Cubehelix>,
-    q_can_animate: Query<&AnimationTarget, With<Cubehelix>>,
+    ev: Trigger<OnInsert, CubehelixRoot>,
+    q_can_animate: Query<&AnimationTarget, With<CubehelixRoot>>,
     mut commands: Commands,
 ) {
     let Ok(_) = q_can_animate.get(ev.entity()) else {
@@ -338,7 +343,7 @@ fn animate_cubehelix(
             clip.add_curve_to_target(
                 target,
                 AnimatableCurve::new(
-                    animated_field!(Cubehelix::value),
+                    animated_field!(CubehelixRoot::value),
                     EasingCurve::new(0., 1., EaseFunction::Linear)
                         .reparametrize_linear(interval(0., 5.0).unwrap())
                         .unwrap(),
@@ -351,18 +356,15 @@ fn animate_cubehelix(
 
 #[derive(Bundle)]
 struct CubehelixBundle {
-    cubehelix: Cubehelix,
+    cubehelix: CubehelixRoot,
     target: AnimationTarget,
     tracker: CubehelixAnimationNode,
 }
 
 impl CubehelixBundle {
-    fn new(phase: f32, player: Entity) -> Self {
+    fn new(player: Entity) -> Self {
         CubehelixBundle {
-            cubehelix: Cubehelix {
-                phase,
-                ..Default::default()
-            },
+            cubehelix: CubehelixRoot::default(),
             target: AnimationTarget {
                 id: AnimationTargetId(Uuid::new_v4()),
                 player,
@@ -374,7 +376,7 @@ impl CubehelixBundle {
 
 impl Default for CubehelixBundle {
     fn default() -> Self {
-        CubehelixBundle::new(0., Entity::PLACEHOLDER)
+        CubehelixBundle::new(Entity::PLACEHOLDER)
     }
 }
 
@@ -386,10 +388,14 @@ fn setup(
     mut animation_graphs: ResMut<Assets<AnimationGraph>>,
 ) {
     commands.spawn(Camera2d);
-    commands.spawn((
-        AnimationPlayer::default(),
-        AnimationGraphHandle(animation_graphs.add(AnimationGraph::new())),
-    ));
+    let player = commands
+        .spawn((
+            AnimationPlayer::default(),
+            AnimationGraphHandle(animation_graphs.add(AnimationGraph::new())),
+        ))
+        .id();
+
+    commands.spawn(CubehelixBundle::new(player));
 
     commands.insert_resource({
         let images = FOX_PAW_IMAGES
