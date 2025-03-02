@@ -2216,19 +2216,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aa9a19cbb55df58761df49b23516a86d432839add4af60fc256da840f66ed35b"
 
 [[package]]
-name = "fox-paws"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy-inspector-egui",
- "getrandom 0.3.1",
- "petgraph",
- "rand 0.9.0",
- "rand_chacha 0.9.0",
- "uuid",
-]
-
-[[package]]
 name = "futures-channel"
 version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3475,6 +3462,19 @@ name = "presser"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
+
+[[package]]
+name = "pretty-claws"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy-inspector-egui",
+ "getrandom 0.3.1",
+ "petgraph",
+ "rand 0.9.0",
+ "rand_chacha 0.9.0",
+ "uuid",
+]
 
 [[package]]
 name = "prettyplease"
