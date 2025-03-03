@@ -16,7 +16,7 @@ use bevy::{
     ui::widget::NodeImageMode,
     window::PrimaryWindow,
 };
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use petgraph::graph::NodeIndex;
 use rand::{distr::Distribution, seq::IndexedMutRandom, Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -26,9 +26,10 @@ fn main() {
     let mut app = App::new();
 
     app.add_plugins(DefaultPlugins)
+        .add_plugins(EguiPlugin)
         .init_resource::<SeededRng>()
         .init_state::<ColorState>()
-        // .add_plugins(WorldInspectorPlugin::new())
+        // .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         .register_type::<ColorState>()
         .register_type::<CubehelixClaw>()
         .register_type::<CubehelixRoot>()
@@ -49,6 +50,7 @@ fn main() {
                 set_button_border,
                 state_button_clicked,
                 pick_button_clicked,
+                color_clicked,
                 remove_color_button_clicked,
                 place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
                 (spawn_ui, spawn_fox_paws, set_button_background)
@@ -269,7 +271,7 @@ struct UIBorders {
 }
 
 impl UIBorders {
-    fn make_sprite(&self, index: usize, color: Color) -> ImageNode {
+    fn make_node(&self, index: usize, color: Color) -> ImageNode {
         ImageNode::from_atlas_image(self.texture.clone(), TextureAtlas {
             index,
             layout: self.atlas_layout.clone(),
@@ -356,7 +358,7 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
                             .spawn((
                                 ColorStateButton(state),
                                 Button,
-                                borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
+                                borders.make_node(8, Color::hsl(330., 1., 0.2)),
                                 Node {
                                     width: Val::Percent(100.),
                                     justify_content: JustifyContent::Center,
@@ -414,7 +416,7 @@ fn show_pick_buttons(
                 .spawn((
                     Button,
                     PickButton(action),
-                    borders.make_sprite(8, Color::hsl(330., 1., 0.2)),
+                    borders.make_node(8, Color::hsl(330., 1., 0.2)),
                     Node {
                         margin: UiRect::horizontal(Val::Px(5.)).with_bottom(Val::Px(5.)),
                         padding: UiRect::all(Val::Px(10.)),
@@ -490,6 +492,7 @@ fn pick_button_clicked(
                         let color = pick_random_color(&mut rng.0);
                         parent
                             .spawn((
+                                Button,
                                 Node {
                                     width: Val::Percent(100.),
                                     margin: UiRect::all(Val::Px(2.)),
@@ -504,7 +507,7 @@ fn pick_button_clicked(
                             .spawn((
                                 Button,
                                 RemoveColorButton(color_node),
-                                borders.make_sprite(1, Color::hsl(330., 1., 0.2)),
+                                borders.make_node(1, Color::hsl(330., 1., 0.2)),
                                 Node {
                                     // height: Val::Percent(100.),
                                     // height: Val::Px(23.),
@@ -548,6 +551,73 @@ fn pick_button_clicked(
             }
         }
     }
+}
+
+#[derive(Debug, Default)]
+struct ColorClickedState {
+    editing: Option<egui::Color32>,
+    last_entity: Option<Entity>,
+}
+
+fn color_clicked(
+    mut q_colors: Query<(
+        Entity,
+        &mut SelectedColor,
+        &mut BackgroundColor,
+        &Interaction,
+    )>,
+    q_changed: Query<(Entity, &Interaction), Changed<Interaction>>,
+    mut local: Local<ColorClickedState>,
+    mut contexts: EguiContexts,
+) {
+    let mut did_click = None;
+    for (entity, &interaction) in &q_changed {
+        if !q_colors.contains(entity) {
+            continue;
+        }
+        if let Interaction::Pressed = interaction {
+            local.last_entity = Some(entity);
+            did_click = Some(entity);
+        }
+    }
+    let _: Option<()> = try {
+        if let Some(entity) = did_click {
+            let (_, selection, _, _) = q_colors.get(entity).ok()?;
+            let bevy_srgba: Srgba = selection.selected.into();
+            let [r, g, b, a] = bevy_srgba.to_u8_array();
+            local.editing = Some(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
+        }
+        let mut did_update = false;
+        let mut clear_editing = false;
+        if let Some(ref mut editing_color) = &mut local.editing {
+            egui::Window::new("Color picker")
+                .anchor(egui::Align2::CENTER_TOP, [0., 0.])
+                .resizable(false)
+                .show(contexts.ctx_mut(), |ui| {
+                    clear_editing = ui.button("Done").clicked();
+                    did_update = egui::widgets::color_picker::color_picker_color32(
+                        ui,
+                        editing_color,
+                        egui::color_picker::Alpha::Opaque,
+                    );
+                });
+        }
+        if clear_editing {
+            local.editing = None;
+        } else if did_update {
+            let entity = local.last_entity?;
+            let (_, mut selection, mut background, _) = q_colors.get_mut(entity).ok()?;
+            let egui_srgba = local.editing?;
+            let new_color = Color::srgba_u8(
+                egui_srgba.r(),
+                egui_srgba.g(),
+                egui_srgba.b(),
+                egui_srgba.a(),
+            );
+            selection.selected = new_color;
+            background.0 = new_color;
+        }
+    };
 }
 
 fn remove_color_button_clicked(
