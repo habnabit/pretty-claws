@@ -13,10 +13,10 @@ use bevy::{
     animation::{animated_field, AnimationTarget, AnimationTargetId, RepeatAnimation},
     input::common_conditions::input_just_pressed,
     prelude::*,
+    render::render_resource::{AsBindGroup, ShaderRef},
     ui::widget::NodeImageMode,
     window::PrimaryWindow,
 };
-use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use petgraph::graph::NodeIndex;
 use rand::{distr::Distribution, seq::IndexedMutRandom, Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -26,14 +26,17 @@ fn main() {
     let mut app = App::new();
 
     app.add_plugins(DefaultPlugins)
-        .add_plugins(EguiPlugin)
+        .add_plugins(UiMaterialPlugin::<ColorGradientMaterial>::default())
         .init_resource::<SeededRng>()
         .init_state::<ColorState>()
-        // .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
+        .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
+        .register_asset_reflect::<ColorGradientMaterial>()
+        .register_type::<ColorPicker>()
+        .register_type::<ColorPickerAttribute>()
         .register_type::<ColorState>()
+        .register_type::<CubehelixAnimationNode>()
         .register_type::<CubehelixClaw>()
         .register_type::<CubehelixRoot>()
-        .register_type::<CubehelixAnimationNode>()
         .register_type::<FoxClaw>()
         .register_type::<FoxPaw>()
         .register_type::<FoxPaws>()
@@ -52,6 +55,7 @@ fn main() {
                 pick_button_clicked,
                 color_clicked,
                 remove_color_button_clicked,
+                update_gradient,
                 place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
                 (spawn_ui, spawn_fox_paws, set_button_background)
                     .chain()
@@ -487,46 +491,52 @@ fn pick_button_clicked(
         match button.0 {
             PickButtonAction::AddColor => {
                 commands.entity(area).with_children(|parent| {
-                    parent.spawn(Node { ..default() }).with_children(|parent| {
-                        let color_node = parent.parent_entity();
-                        let color = pick_random_color(&mut rng.0);
-                        parent
-                            .spawn((
-                                Button,
-                                Node {
-                                    width: Val::Percent(100.),
-                                    margin: UiRect::all(Val::Px(2.)),
-                                    padding: UiRect::all(Val::Px(2.)).with_left(Val::Px(5.)),
-                                    ..default()
-                                },
-                                SelectedColor { selected: color },
-                                BackgroundColor(color),
-                            ))
-                            .with_child((Text::new("0"), TextColor(Color::hsl(0., 0., 0.1))));
-                        parent
-                            .spawn((
-                                Button,
-                                RemoveColorButton(color_node),
-                                borders.make_node(1, Color::hsl(330., 1., 0.2)),
-                                Node {
-                                    // height: Val::Percent(100.),
-                                    // height: Val::Px(23.),
-                                    width: Val::Px(23.),
-                                    margin: UiRect::all(Val::Px(2.)),
-                                    justify_content: JustifyContent::Center,
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },
-                                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
-                            ))
-                            .with_children(|parent| {
-                                parent.spawn((
-                                    Text::new("x"),
-                                    TextFont::from_font_size(14.),
-                                    TextColor(Color::hsl(0., 0., 0.1)),
-                                ));
-                            });
-                    });
+                    parent
+                        .spawn(Node {
+                            display: Display::Grid,
+                            grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::auto()],
+                            ..default()
+                        })
+                        .with_children(|parent| {
+                            let color_node = parent.parent_entity();
+                            let color = pick_random_color(&mut rng.0);
+                            parent
+                                .spawn((
+                                    Button,
+                                    Node {
+                                        width: Val::Percent(100.),
+                                        margin: UiRect::all(Val::Px(2.)),
+                                        padding: UiRect::all(Val::Px(2.)).with_left(Val::Px(5.)),
+                                        ..default()
+                                    },
+                                    SelectedColor { selected: color },
+                                    BackgroundColor(color),
+                                ))
+                                .with_child((Text::new("0"), TextColor(Color::hsl(0., 0., 0.1))));
+                            parent
+                                .spawn((
+                                    Button,
+                                    RemoveColorButton(color_node),
+                                    borders.make_node(1, Color::hsl(330., 1., 0.2)),
+                                    Node {
+                                        // height: Val::Percent(100.),
+                                        // height: Val::Px(23.),
+                                        width: Val::Px(23.),
+                                        margin: UiRect::all(Val::Px(2.)),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                                ))
+                                .with_children(|parent| {
+                                    parent.spawn((
+                                        Text::new("x"),
+                                        TextFont::from_font_size(14.),
+                                        TextColor(Color::hsl(0., 0., 0.1)),
+                                    ));
+                                });
+                        });
                 });
             }
             PickButtonAction::Randomize => {
@@ -555,69 +565,218 @@ fn pick_button_clicked(
 
 #[derive(Debug, Default)]
 struct ColorClickedState {
-    editing: Option<egui::Color32>,
-    last_entity: Option<Entity>,
+    last_picker: Option<Entity>,
+}
+
+#[derive(Debug, Clone, Default, Component, Reflect)]
+struct ColorPicker {
+    color: Hsla,
+}
+
+#[derive(Debug, Copy, Clone, Reflect)]
+enum HslaAttribute {
+    Hue,
+    Saturation,
+    Lightness,
+}
+
+impl HslaAttribute {
+    fn derive_poles(&self, color: Hsla) -> (Hsla, Hsla, Hsla) {
+        match *self {
+            HslaAttribute::Hue => (
+                color.with_hue(0.),
+                color.with_hue(180.),
+                color.with_hue(360.),
+            ),
+            HslaAttribute::Saturation => (
+                color.with_saturation(0.),
+                color.with_saturation(0.5),
+                color.with_saturation(1.),
+            ),
+            HslaAttribute::Lightness => (
+                color.with_luminance(0.),
+                color.with_luminance(0.5),
+                color.with_luminance(1.),
+            ),
+        }
+    }
+
+    fn short_name(&self) -> &'static str {
+        match *self {
+            HslaAttribute::Hue => "H",
+            HslaAttribute::Saturation => "S",
+            HslaAttribute::Lightness => "L",
+        }
+    }
+
+    fn current(&self, color: Hsla) -> f32 {
+        match *self {
+            HslaAttribute::Hue => color.hue / 360.,
+            HslaAttribute::Saturation => color.saturation,
+            HslaAttribute::Lightness => color.lightness,
+        }
+    }
+}
+
+impl HslaAttribute {
+    const ALL: &[HslaAttribute] = &[
+        HslaAttribute::Hue,
+        HslaAttribute::Saturation,
+        HslaAttribute::Lightness,
+    ];
+}
+
+#[derive(Debug, Clone, Component, Reflect)]
+struct ColorPickerAttribute {
+    picker: Entity,
+    attr: HslaAttribute,
+    current: f32,
 }
 
 fn color_clicked(
-    mut q_colors: Query<(
-        Entity,
-        &mut SelectedColor,
-        &mut BackgroundColor,
-        &Interaction,
-    )>,
+    q_colors: Query<(&Parent, &SelectedColor)>,
     q_changed: Query<(Entity, &Interaction), Changed<Interaction>>,
+    q_picker: Query<&ColorPicker>,
+    mut materials: ResMut<Assets<ColorGradientMaterial>>,
+    mut commands: Commands,
     mut local: Local<ColorClickedState>,
-    mut contexts: EguiContexts,
+    asset_server: Res<AssetServer>,
 ) {
-    let mut did_click = None;
+    let slider = std::cell::LazyCell::new(|| asset_server.load("slider.png"));
     for (entity, &interaction) in &q_changed {
-        if !q_colors.contains(entity) {
+        let Ok((parent, selected)) = q_colors.get(entity) else {
+            continue;
+        };
+        if interaction != Interaction::Pressed {
             continue;
         }
-        if let Interaction::Pressed = interaction {
-            local.last_entity = Some(entity);
-            did_click = Some(entity);
+        if let Some(last_entity) = local.last_picker.take() {
+            if q_picker.contains(last_entity) {
+                commands.entity(last_entity).despawn_recursive();
+            }
         }
-    }
-    let _: Option<()> = try {
-        if let Some(entity) = did_click {
-            let (_, selection, _, _) = q_colors.get(entity).ok()?;
-            let bevy_srgba: Srgba = selection.selected.into();
-            let [r, g, b, a] = bevy_srgba.to_u8_array();
-            local.editing = Some(egui::Color32::from_rgba_unmultiplied(r, g, b, a));
-        }
-        let mut did_update = false;
-        let mut clear_editing = false;
-        if let Some(ref mut editing_color) = &mut local.editing {
-            egui::Window::new("Color picker")
-                .anchor(egui::Align2::CENTER_TOP, [0., 0.])
-                .resizable(false)
-                .show(contexts.ctx_mut(), |ui| {
-                    clear_editing = ui.button("Done").clicked();
-                    did_update = egui::widgets::color_picker::color_picker_color32(
-                        ui,
-                        editing_color,
-                        egui::color_picker::Alpha::Opaque,
-                    );
+        let mut picker = Entity::PLACEHOLDER;
+        commands.entity(**parent).with_children(|parent| {
+            let color = selected.selected.into();
+            parent
+                .spawn((
+                    Node {
+                        grid_column: GridPlacement::span(2),
+                        flex_direction: FlexDirection::Column,
+                        ..default()
+                    },
+                    ColorPicker { color },
+                ))
+                .with_children(|parent| {
+                    picker = parent.parent_entity();
+                    for &attr in HslaAttribute::ALL {
+                        let (color1, color2, color3) = attr.derive_poles(color);
+                        let color1 = color1.to_vec4();
+                        let color2 = color2.to_vec4();
+                        let color3 = color3.to_vec4();
+                        let current = attr.current(color);
+                        parent
+                            .spawn((
+                                Node {
+                                    width: Val::Percent(100.),
+                                    display: Display::Grid,
+                                    grid_template_columns: vec![
+                                        GridTrack::auto(),
+                                        GridTrack::flex(1.0),
+                                    ],
+                                    ..default()
+                                },
+                                ColorPickerAttribute {
+                                    attr,
+                                    current,
+                                    picker,
+                                },
+                            ))
+                            .with_children(|parent| {
+                                parent
+                                    .spawn((
+                                        Node {
+                                            margin: UiRect::all(Val::Px(1.)),
+                                            padding: UiRect::all(Val::Px(3.)),
+                                            ..default()
+                                        },
+                                        BackgroundColor(Color::hsla(0., 0., 0.9, 0.2)),
+                                    ))
+                                    .with_child((
+                                        Text::new(attr.short_name()),
+                                        TextColor(Color::hsl(0., 0., 0.1)),
+                                    ));
+                                parent.spawn((
+                                    Node {
+                                        width: Val::Percent(100.),
+                                        margin: UiRect::all(Val::Px(1.)),
+                                        ..default()
+                                    },
+                                    MaterialNode(materials.add(ColorGradientMaterial {
+                                        color1,
+                                        color2,
+                                        color3,
+                                        color_selected: color.to_vec4(),
+                                        slider: (*slider).clone(),
+                                        slider_ratio: 1.,
+                                        slider_position: current,
+                                    })),
+                                ));
+                            });
+                    }
                 });
-        }
-        if clear_editing {
-            local.editing = None;
-        } else if did_update {
-            let entity = local.last_entity?;
-            let (_, mut selection, mut background, _) = q_colors.get_mut(entity).ok()?;
-            let egui_srgba = local.editing?;
-            let new_color = Color::srgba_u8(
-                egui_srgba.r(),
-                egui_srgba.g(),
-                egui_srgba.b(),
-                egui_srgba.a(),
-            );
-            selection.selected = new_color;
-            background.0 = new_color;
-        }
-    };
+        });
+        local.last_picker = Some(picker);
+    }
+}
+
+impl UiMaterial for ColorGradientMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "color_gradient.wgsl".into()
+    }
+}
+
+#[derive(Asset, TypePath, AsBindGroup, Debug, Clone, Reflect)]
+#[reflect(type_path = false)]
+struct ColorGradientMaterial {
+    #[uniform(0)]
+    color1: Vec4,
+    #[uniform(1)]
+    color2: Vec4,
+    #[uniform(2)]
+    color3: Vec4,
+    #[uniform(7)]
+    color_selected: Vec4,
+    #[texture(3)]
+    #[sampler(4)]
+    slider: Handle<Image>,
+    #[uniform(5)]
+    slider_ratio: f32,
+    #[uniform(6)]
+    slider_position: f32,
+}
+
+fn update_gradient(
+    q_picker: Query<&ColorPicker>,
+    q_parent: Query<&ColorPickerAttribute>,
+    q_nodes: Query<(&MaterialNode<ColorGradientMaterial>, &ComputedNode, &Parent)>,
+    mut materials: ResMut<Assets<ColorGradientMaterial>>,
+) {
+    for (mat, node, parent) in &q_nodes {
+        let Some(mat) = materials.get_mut(mat.id()) else {
+            continue;
+        };
+        let Ok(attr_picker) = q_parent.get(**parent) else {
+            continue;
+        };
+        let Ok(picker) = q_picker.get(attr_picker.picker) else {
+            continue;
+        };
+        let node_size = node.size();
+        mat.slider_position = attr_picker.current;
+        mat.slider_ratio = 21. / node_size.x / node.inverse_scale_factor();
+        mat.color_selected = picker.color.to_vec4();
+    }
 }
 
 fn remove_color_button_clicked(
@@ -751,7 +910,6 @@ fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlasLayout>>,
-    // mut rng: ResMut<SeededRng>,
     mut animation_graphs: ResMut<Assets<AnimationGraph>>,
 ) {
     commands.spawn(Camera2d);
