@@ -43,9 +43,11 @@ fn main() {
         .register_type::<FoxPawSlices>()
         .register_type::<FoxPawsSpinNode>()
         .register_type::<SeededRng>()
+        .register_type::<SelectedColor>()
         .register_type::<StateNodeArea>()
         .register_type::<UIBorders>()
         .add_observer(animate_cubehelix)
+        .add_observer(gradient_drag)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -568,8 +570,9 @@ struct ColorClickedState {
     last_picker: Option<Entity>,
 }
 
-#[derive(Debug, Clone, Default, Component, Reflect)]
+#[derive(Debug, Clone, Component, Reflect)]
 struct ColorPicker {
+    source: Entity,
     color: Hsla,
 }
 
@@ -582,23 +585,16 @@ enum HslaAttribute {
 
 impl HslaAttribute {
     fn derive_poles(&self, color: Hsla) -> (Hsla, Hsla, Hsla) {
-        match *self {
-            HslaAttribute::Hue => (
-                color.with_hue(0.),
-                color.with_hue(180.),
-                color.with_hue(360.),
-            ),
-            HslaAttribute::Saturation => (
-                color.with_saturation(0.),
-                color.with_saturation(0.5),
-                color.with_saturation(1.),
-            ),
-            HslaAttribute::Lightness => (
-                color.with_luminance(0.),
-                color.with_luminance(0.5),
-                color.with_luminance(1.),
-            ),
-        }
+        (
+            self.with_current(0., color),
+            self.with_current(0.5, color),
+            self.with_current(1., color),
+        )
+    }
+
+    fn derive_poles_vec4(&self, color: Hsla) -> (Vec4, Vec4, Vec4) {
+        let (a, b, c) = self.derive_poles(color);
+        (a.to_vec4(), b.to_vec4(), c.to_vec4())
     }
 
     fn short_name(&self) -> &'static str {
@@ -614,6 +610,22 @@ impl HslaAttribute {
             HslaAttribute::Hue => color.hue / 360.,
             HslaAttribute::Saturation => color.saturation,
             HslaAttribute::Lightness => color.lightness,
+        }
+    }
+
+    fn format_current(&self, color: Hsla) -> String {
+        match *self {
+            HslaAttribute::Hue => format!("{:.1}°", color.hue),
+            HslaAttribute::Saturation => format!("{:.1}%", color.saturation * 100.),
+            HslaAttribute::Lightness => format!("{:.1}%", color.lightness * 100.),
+        }
+    }
+
+    fn with_current(&self, v: f32, color: Hsla) -> Hsla {
+        match *self {
+            HslaAttribute::Hue => color.with_hue(v * 360.),
+            HslaAttribute::Saturation => color.with_saturation(v),
+            HslaAttribute::Lightness => color.with_lightness(v),
         }
     }
 }
@@ -665,15 +677,15 @@ fn color_clicked(
                         flex_direction: FlexDirection::Column,
                         ..default()
                     },
-                    ColorPicker { color },
+                    ColorPicker {
+                        source: entity,
+                        color,
+                    },
                 ))
                 .with_children(|parent| {
                     picker = parent.parent_entity();
                     for &attr in HslaAttribute::ALL {
-                        let (color1, color2, color3) = attr.derive_poles(color);
-                        let color1 = color1.to_vec4();
-                        let color2 = color2.to_vec4();
-                        let color3 = color3.to_vec4();
+                        let (color1, color2, color3) = attr.derive_poles_vec4(color);
                         let current = attr.current(color);
                         parent
                             .spawn((
@@ -706,22 +718,35 @@ fn color_clicked(
                                         Text::new(attr.short_name()),
                                         TextColor(Color::hsl(0., 0., 0.1)),
                                     ));
-                                parent.spawn((
-                                    Node {
-                                        width: Val::Percent(100.),
-                                        margin: UiRect::all(Val::Px(1.)),
-                                        ..default()
-                                    },
-                                    MaterialNode(materials.add(ColorGradientMaterial {
-                                        color1,
-                                        color2,
-                                        color3,
-                                        color_selected: color.to_vec4(),
-                                        slider: (*slider).clone(),
-                                        slider_ratio: 1.,
-                                        slider_position: current,
-                                    })),
-                                ));
+                                parent
+                                    .spawn((
+                                        Button,
+                                        Node {
+                                            width: Val::Percent(100.),
+                                            margin: UiRect::all(Val::Px(1.)),
+                                            justify_content: JustifyContent::Center,
+                                            align_items: AlignItems::Center,
+                                            ..default()
+                                        },
+                                        MaterialNode(materials.add(ColorGradientMaterial {
+                                            color1,
+                                            color2,
+                                            color3,
+                                            color_selected: color.to_vec4(),
+                                            slider: (*slider).clone(),
+                                            slider_ratio: 1.,
+                                            slider_position: current,
+                                        })),
+                                    ))
+                                    .with_child((
+                                        Node {
+                                            left: Val::Px(15.),
+                                            ..default()
+                                        },
+                                        Text::new(attr.format_current(color)),
+                                        TextFont::from_font_size(13.),
+                                        TextColor(Color::hsl(0., 0., 0.1)),
+                                    ));
                             });
                     }
                 });
@@ -756,6 +781,72 @@ struct ColorGradientMaterial {
     slider_position: f32,
 }
 
+fn gradient_drag(
+    _ev: Trigger<Pointer<Move>>,
+    q_camera: Query<&Camera>,
+    q_window: Query<&Window, With<PrimaryWindow>>,
+    mut q_selected: Query<(&mut SelectedColor, &mut BackgroundColor)>,
+    mut q_picker: Query<&mut ColorPicker>,
+    mut q_parent: Query<&mut ColorPickerAttribute>,
+    mut q_text: Query<&mut Text>,
+    q_nodes: Query<
+        (
+            &Interaction,
+            &Parent,
+            &Children,
+            &ComputedNode,
+            &GlobalTransform,
+        ),
+        With<MaterialNode<ColorGradientMaterial>>,
+    >,
+) {
+    let Some(physical_viewport) = q_camera
+        .get_single()
+        .ok()
+        .and_then(|c| c.physical_viewport_rect())
+    else {
+        return;
+    };
+    let Ok(window) = q_window.get_single() else {
+        return;
+    };
+    let Some(physical_cursor_position) = window.physical_cursor_position() else {
+        return;
+    };
+    let cursor_position = physical_cursor_position - physical_viewport.min.as_vec2();
+    for (&interaction, parent, children, node, global_transform) in &q_nodes {
+        if interaction != Interaction::Pressed {
+            continue;
+        }
+        let Ok(mut attr_picker) = q_parent.get_mut(**parent) else {
+            continue;
+        };
+        let Ok(mut picker) = q_picker.get_mut(attr_picker.picker) else {
+            continue;
+        };
+        let Ok(mut selected) = q_selected.get_mut(picker.source) else {
+            continue;
+        };
+        let node_size = node.size();
+        let node_rect = Rect::from_center_size(
+            global_transform.compute_transform().translation.xy(),
+            node_size,
+        );
+        let current = ((cursor_position.x - node_rect.min.x) / node_size.x).clamp(0., 1.);
+        // too many updates in one system
+        attr_picker.current = current;
+        picker.color = attr_picker.attr.with_current(current, picker.color);
+        selected.0.selected = picker.color.into();
+        selected.1 .0 = selected.0.selected;
+        for child in children {
+            let Ok(mut text) = q_text.get_mut(*child) else {
+                continue;
+            };
+            **text = attr_picker.attr.format_current(picker.color);
+        }
+    }
+}
+
 fn update_gradient(
     q_picker: Query<&ColorPicker>,
     q_parent: Query<&ColorPickerAttribute>,
@@ -772,9 +863,9 @@ fn update_gradient(
         let Ok(picker) = q_picker.get(attr_picker.picker) else {
             continue;
         };
-        let node_size = node.size();
+        (mat.color1, mat.color2, mat.color3) = attr_picker.attr.derive_poles_vec4(picker.color);
         mat.slider_position = attr_picker.current;
-        mat.slider_ratio = 21. / node_size.x / node.inverse_scale_factor();
+        mat.slider_ratio = 21. / node.size().x / node.inverse_scale_factor();
         mat.color_selected = picker.color.to_vec4();
     }
 }
