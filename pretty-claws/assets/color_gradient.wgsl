@@ -5,10 +5,10 @@
 @group(1) @binding(0) var<uniform> color1: vec4<f32>;
 @group(1) @binding(1) var<uniform> color2: vec4<f32>;
 @group(1) @binding(2) var<uniform> color3: vec4<f32>;
-@group(1) @binding(7) var<uniform> color_selected: vec4<f32>;
+@group(1) @binding(5) var<uniform> color_selected: vec4<f32>;
 @group(1) @binding(3) var slider_texture: texture_2d<f32>;
 @group(1) @binding(4) var slider_sampler: sampler;
-@group(1) @binding(5) var<uniform> slider_ratio: f32;
+// @group(1) @binding(5) var<uniform> slider_ratio: f32;
 @group(1) @binding(6) var<uniform> slider_position: f32;
 
 // Based on https://en.wikipedia.org/wiki/HSL_and_HSV#HSL_to_HSV
@@ -34,6 +34,10 @@ fn hsla2rgba(hsla: vec4<f32>) -> vec4<f32> {
 
 @fragment
 fn fragment(in: UiVertexOutput) -> @location(0) vec4<f32> {
+    let slider_size = vec2<f32>(textureDimensions(slider_texture));
+    let into_size = vec2<f32>(in.size);
+    let slider_shrink = into_size.y / slider_size.y;
+    let slider_ratio = (slider_size.x * slider_shrink) / into_size.x;
     let slider_potential_x = 1 - slider_ratio;
     let slider_start_at = slider_potential_x * slider_position;
     let slider_end_at = slider_start_at + slider_ratio;

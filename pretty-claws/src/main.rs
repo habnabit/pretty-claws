@@ -663,8 +663,11 @@ fn color_clicked(
             continue;
         }
         if let Some(last_entity) = local.last_picker.take() {
-            if q_picker.contains(last_entity) {
+            if let Ok(prev) = q_picker.get(last_entity) {
                 commands.entity(last_entity).despawn_recursive();
+                if prev.source == entity {
+                    continue;
+                }
             }
         }
         let mut picker = Entity::PLACEHOLDER;
@@ -734,7 +737,6 @@ fn color_clicked(
                                             color3,
                                             color_selected: color.to_vec4(),
                                             slider: (*slider).clone(),
-                                            slider_ratio: 1.,
                                             slider_position: current,
                                         })),
                                     ))
@@ -746,6 +748,7 @@ fn color_clicked(
                                         Text::new(attr.format_current(color)),
                                         TextFont::from_font_size(13.),
                                         TextColor(Color::hsl(0., 0., 0.1)),
+                                        BackgroundColor(Color::hsla(0., 0., 0.9, 0.5)),
                                     ));
                             });
                     }
@@ -770,13 +773,11 @@ struct ColorGradientMaterial {
     color2: Vec4,
     #[uniform(2)]
     color3: Vec4,
-    #[uniform(7)]
+    #[uniform(5)]
     color_selected: Vec4,
     #[texture(3)]
     #[sampler(4)]
     slider: Handle<Image>,
-    #[uniform(5)]
-    slider_ratio: f32,
     #[uniform(6)]
     slider_position: f32,
 }
@@ -838,8 +839,8 @@ fn gradient_drag(
         picker.color = attr_picker.attr.with_current(current, picker.color);
         selected.0.selected = picker.color.into();
         selected.1 .0 = selected.0.selected;
-        for child in children {
-            let Ok(mut text) = q_text.get_mut(*child) else {
+        for &child in children {
+            let Ok(mut text) = q_text.get_mut(child) else {
                 continue;
             };
             **text = attr_picker.attr.format_current(picker.color);
@@ -850,10 +851,10 @@ fn gradient_drag(
 fn update_gradient(
     q_picker: Query<&ColorPicker>,
     q_parent: Query<&ColorPickerAttribute>,
-    q_nodes: Query<(&MaterialNode<ColorGradientMaterial>, &ComputedNode, &Parent)>,
+    q_nodes: Query<(&MaterialNode<ColorGradientMaterial>, &Parent)>,
     mut materials: ResMut<Assets<ColorGradientMaterial>>,
 ) {
-    for (mat, node, parent) in &q_nodes {
+    for (mat, parent) in &q_nodes {
         let Some(mat) = materials.get_mut(mat.id()) else {
             continue;
         };
@@ -865,7 +866,6 @@ fn update_gradient(
         };
         (mat.color1, mat.color2, mat.color3) = attr_picker.attr.derive_poles_vec4(picker.color);
         mat.slider_position = attr_picker.current;
-        mat.slider_ratio = 21. / node.size().x / node.inverse_scale_factor();
         mat.color_selected = picker.color.to_vec4();
     }
 }
