@@ -29,8 +29,9 @@ fn main() {
         .add_plugins(UiMaterialPlugin::<ColorGradientMaterial>::default())
         .init_resource::<SeededRng>()
         .init_state::<ColorState>()
-        .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
+        // .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         .register_asset_reflect::<ColorGradientMaterial>()
+        .register_type::<AppAssets>()
         .register_type::<ColorPicker>()
         .register_type::<ColorPickerAttribute>()
         .register_type::<ColorState>()
@@ -40,12 +41,10 @@ fn main() {
         .register_type::<FoxClaw>()
         .register_type::<FoxPaw>()
         .register_type::<FoxPaws>()
-        .register_type::<FoxPawSlices>()
         .register_type::<FoxPawsSpinNode>()
         .register_type::<SeededRng>()
         .register_type::<SelectedColor>()
         .register_type::<StateNodeArea>()
-        .register_type::<UIBorders>()
         .add_observer(animate_cubehelix)
         .add_observer(gradient_drag)
         .add_systems(Startup, setup)
@@ -80,6 +79,32 @@ fn main() {
 
 #[derive(Resource, Reflect)]
 #[reflect(Resource)]
+struct AppAssets {
+    fox_paw_images: Vec<Handle<Image>>,
+    borders: Handle<Image>,
+    slider: Handle<Image>,
+    font: Handle<Font>,
+    border_atlas_layout: Handle<TextureAtlasLayout>,
+    border_slicer: TextureSlicer,
+}
+
+impl AppAssets {
+    fn make_borders(&self, index: usize, color: Color) -> ImageNode {
+        ImageNode::from_atlas_image(self.borders.clone(), TextureAtlas {
+            index,
+            layout: self.border_atlas_layout.clone(),
+        })
+        .with_color(color)
+        .with_mode(NodeImageMode::Sliced(self.border_slicer.clone()))
+    }
+
+    fn text_font(&self) -> TextFont {
+        TextFont::from_font(self.font.clone_weak())
+    }
+}
+
+#[derive(Resource, Reflect)]
+#[reflect(Resource)]
 #[reflect(from_reflect = false)]
 struct SeededRng(#[reflect(ignore)] ChaCha8Rng);
 
@@ -104,12 +129,6 @@ static FOX_PAW_IMAGES: &[&'static str] = &[
     "paw2-5.png",
 ];
 static FOX_PAW_SIZE: Vec2 = Vec2::new(172.13, 250.);
-
-#[derive(Resource, Reflect)]
-#[reflect(Resource)]
-struct FoxPawSlices {
-    images: Vec<Handle<Image>>,
-}
 
 #[derive(Debug, Default, Component, Reflect)]
 struct FoxPaws {
@@ -160,7 +179,7 @@ impl SavedAnimationNode for FoxPawsSpinNode {
 
 fn spawn_fox_paws(
     q_player: Query<Entity, With<AnimationPlayer>>,
-    slices: Res<FoxPawSlices>,
+    assets: Res<AppAssets>,
     mut commands: Commands,
 ) {
     let Ok(player) = q_player.get_single() else {
@@ -171,7 +190,7 @@ fn spawn_fox_paws(
         parent
             .spawn((
                 Sprite {
-                    image: slices.images[0].clone(),
+                    image: assets.fox_paw_images[0].clone(),
                     flip_x,
                     custom_size: Some(FOX_PAW_SIZE),
                     ..default()
@@ -180,7 +199,7 @@ fn spawn_fox_paws(
                 paw,
             ))
             .with_children(|parent| {
-                for (e, image) in (&slices.images[1..]).into_iter().enumerate() {
+                for (e, image) in (&assets.fox_paw_images[1..]).into_iter().enumerate() {
                     parent.spawn((
                         Sprite {
                             image: image.clone(),
@@ -268,25 +287,6 @@ fn spin_fox_paws(
     );
 }
 
-#[derive(Resource, Reflect)]
-#[reflect(Resource)]
-struct UIBorders {
-    texture: Handle<Image>,
-    atlas_layout: Handle<TextureAtlasLayout>,
-    slicer: TextureSlicer,
-}
-
-impl UIBorders {
-    fn make_node(&self, index: usize, color: Color) -> ImageNode {
-        ImageNode::from_atlas_image(self.texture.clone(), TextureAtlas {
-            index,
-            layout: self.atlas_layout.clone(),
-        })
-        .with_color(color)
-        .with_mode(NodeImageMode::Sliced(self.slicer.clone()))
-    }
-}
-
 #[derive(States, Reflect, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ColorState {
     #[default]
@@ -339,7 +339,7 @@ fn state_button_clicked(
 #[derive(Reflect, Debug, Component, Clone)]
 struct StateNodeArea;
 
-fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
+fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
     commands.set_state(ColorState::Rainbow);
     commands
         .spawn((
@@ -364,7 +364,7 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
                             .spawn((
                                 ColorStateButton(state),
                                 Button,
-                                borders.make_node(8, Color::hsl(330., 1., 0.2)),
+                                assets.make_borders(8, Color::hsl(330., 1., 0.2)),
                                 Node {
                                     width: Val::Percent(100.),
                                     justify_content: JustifyContent::Center,
@@ -378,6 +378,7 @@ fn spawn_ui(borders: Res<UIBorders>, mut commands: Commands) {
                             .with_children(|parent| {
                                 parent.spawn((
                                     Text::new(format!("{state:?}")),
+                                    assets.text_font(),
                                     TextColor(Color::hsl(0., 0., 0.1)),
                                 ));
                             });
@@ -410,7 +411,7 @@ struct ColorsNodeArea;
 
 fn show_pick_buttons(
     q_area: Query<Entity, With<StateNodeArea>>,
-    borders: Res<UIBorders>,
+    assets: Res<AppAssets>,
     mut commands: Commands,
 ) {
     let Ok(area) = q_area.get_single() else {
@@ -422,7 +423,7 @@ fn show_pick_buttons(
                 .spawn((
                     Button,
                     PickButton(action),
-                    borders.make_node(8, Color::hsl(330., 1., 0.2)),
+                    assets.make_borders(8, Color::hsl(330., 1., 0.2)),
                     Node {
                         margin: UiRect::horizontal(Val::Px(5.)).with_bottom(Val::Px(5.)),
                         padding: UiRect::all(Val::Px(10.)),
@@ -435,6 +436,7 @@ fn show_pick_buttons(
                 .with_children(|parent| {
                     parent.spawn((
                         Text::new(format!("{action:?}")),
+                        assets.text_font(),
                         TextColor(Color::hsl(0., 0., 0.1)),
                     ));
                 });
@@ -479,7 +481,7 @@ fn pick_button_clicked(
     q_colors: Query<(&SelectedColor, &Children)>,
     mut q_claws: Query<&mut Sprite, With<FoxClaw>>,
     mut q_text: Query<&mut Text>,
-    borders: Res<UIBorders>,
+    assets: Res<AppAssets>,
     mut rng: ResMut<SeededRng>,
     mut commands: Commands,
 ) {
@@ -514,12 +516,16 @@ fn pick_button_clicked(
                                     SelectedColor { selected: color },
                                     BackgroundColor(color),
                                 ))
-                                .with_child((Text::new("0"), TextColor(Color::hsl(0., 0., 0.1))));
+                                .with_child((
+                                    Text::new("0"),
+                                    assets.text_font(),
+                                    TextColor(Color::hsl(0., 0., 0.1)),
+                                ));
                             parent
                                 .spawn((
                                     Button,
                                     RemoveColorButton(color_node),
-                                    borders.make_node(1, Color::hsl(330., 1., 0.2)),
+                                    assets.make_borders(1, Color::hsl(330., 1., 0.2)),
                                     Node {
                                         // height: Val::Percent(100.),
                                         // height: Val::Px(23.),
@@ -534,7 +540,7 @@ fn pick_button_clicked(
                                 .with_children(|parent| {
                                     parent.spawn((
                                         Text::new("x"),
-                                        TextFont::from_font_size(14.),
+                                        assets.text_font().with_font_size(14.),
                                         TextColor(Color::hsl(0., 0., 0.1)),
                                     ));
                                 });
@@ -615,9 +621,9 @@ impl HslaAttribute {
 
     fn format_current(&self, color: Hsla) -> String {
         match *self {
-            HslaAttribute::Hue => format!("{:.1}°", color.hue),
-            HslaAttribute::Saturation => format!("{:.1}%", color.saturation * 100.),
-            HslaAttribute::Lightness => format!("{:.1}%", color.lightness * 100.),
+            HslaAttribute::Hue => format!(" {:.1}° ", color.hue),
+            HslaAttribute::Saturation => format!(" {:.1}% ", color.saturation * 100.),
+            HslaAttribute::Lightness => format!(" {:.1}% ", color.lightness * 100.),
         }
     }
 
@@ -652,9 +658,8 @@ fn color_clicked(
     mut materials: ResMut<Assets<ColorGradientMaterial>>,
     mut commands: Commands,
     mut local: Local<ColorClickedState>,
-    asset_server: Res<AssetServer>,
+    assets: Res<AppAssets>,
 ) {
-    let slider = std::cell::LazyCell::new(|| asset_server.load("slider.png"));
     for (entity, &interaction) in &q_changed {
         let Ok((parent, selected)) = q_colors.get(entity) else {
             continue;
@@ -713,12 +718,16 @@ fn color_clicked(
                                         Node {
                                             margin: UiRect::all(Val::Px(1.)),
                                             padding: UiRect::all(Val::Px(3.)),
+                                            width: Val::Px(25.),
+                                            justify_content: JustifyContent::Center,
+                                            align_items: AlignItems::Center,
                                             ..default()
                                         },
                                         BackgroundColor(Color::hsla(0., 0., 0.9, 0.2)),
                                     ))
                                     .with_child((
                                         Text::new(attr.short_name()),
+                                        assets.text_font(),
                                         TextColor(Color::hsl(0., 0., 0.1)),
                                     ));
                                 parent
@@ -736,17 +745,17 @@ fn color_clicked(
                                             color2,
                                             color3,
                                             color_selected: color.to_vec4(),
-                                            slider: (*slider).clone(),
+                                            slider: assets.slider.clone(),
                                             slider_position: current,
                                         })),
                                     ))
                                     .with_child((
                                         Node {
-                                            left: Val::Px(15.),
+                                            top: Val::Px(7.),
                                             ..default()
                                         },
                                         Text::new(attr.format_current(color)),
-                                        TextFont::from_font_size(13.),
+                                        assets.text_font().with_font_size(13.),
                                         TextColor(Color::hsl(0., 0., 0.1)),
                                         BackgroundColor(Color::hsla(0., 0., 0.9, 0.5)),
                                     ));
@@ -1014,15 +1023,13 @@ fn setup(
     commands.spawn(CubehelixBundle::new(player));
 
     commands.insert_resource({
-        let images = FOX_PAW_IMAGES
+        let fox_paw_images = FOX_PAW_IMAGES
             .iter()
             .map(|&path| asset_server.load(path))
             .collect();
-        FoxPawSlices { images }
-    });
-
-    commands.insert_resource({
-        let texture = asset_server.load("fantasy_ui_border_sheet.png");
+        let borders = asset_server.load("fantasy_ui_border_sheet.png");
+        let slider = asset_server.load("slider.png");
+        let font = asset_server.load("FiraSans-Medium.ttf");
         let atlas_layout = TextureAtlasLayout::from_grid(
             UVec2::splat(48),
             6,
@@ -1030,17 +1037,20 @@ fn setup(
             Some(UVec2::splat(4)),
             Some(UVec2::splat(2)),
         );
-        let atlas_layout = texture_atlases.add(atlas_layout);
-        let slicer = TextureSlicer {
+        let border_atlas_layout = texture_atlases.add(atlas_layout);
+        let border_slicer = TextureSlicer {
             border: BorderRect::square(24.0),
             center_scale_mode: SliceScaleMode::Stretch,
             sides_scale_mode: SliceScaleMode::Stretch,
             max_corner_scale: 1.0,
         };
-        UIBorders {
-            texture,
-            atlas_layout,
-            slicer,
+        AppAssets {
+            fox_paw_images,
+            borders,
+            slider,
+            font,
+            border_atlas_layout,
+            border_slicer,
         }
     });
 }
