@@ -6,7 +6,13 @@
 
 mod animation;
 
-use std::f32::consts::PI;
+use std::{
+    f32::consts::PI,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
+};
 
 use animation::{AnimatorPlugin, SavedAnimationNode};
 use bevy::{
@@ -58,9 +64,10 @@ fn main() {
                 remove_color_button_clicked,
                 update_gradient,
                 place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
+                asset_loader_update.run_if(resource_exists::<AssetBarrier>),
                 (spawn_ui, spawn_fox_paws, set_button_background)
                     .chain()
-                    .run_if(run_once),
+                    .run_if(assets_loaded.and(run_once)),
                 spin_fox_paws.run_if(input_just_pressed(KeyCode::KeyS)),
                 update_cubehelix_color,
             ),
@@ -1006,6 +1013,77 @@ impl Default for CubehelixBundle {
     }
 }
 
+#[derive(Debug, Resource, Deref)]
+struct AssetBarrier(Arc<AssetBarrierInner>);
+
+#[derive(Debug, Deref)]
+struct AssetBarrierGuard(Arc<AssetBarrierInner>);
+
+#[derive(Debug, Resource)]
+struct AssetBarrierInner {
+    count: AtomicU32,
+}
+
+impl AssetBarrier {
+    pub fn new() -> (AssetBarrier, AssetBarrierGuard) {
+        let inner = Arc::new(AssetBarrierInner {
+            count: AtomicU32::new(1),
+        });
+        (AssetBarrier(inner.clone()), AssetBarrierGuard(inner))
+    }
+
+    pub fn assets_remaining(&self) -> u32 {
+        self.count.load(Ordering::Acquire).saturating_sub(1)
+    }
+}
+
+impl Clone for AssetBarrierGuard {
+    fn clone(&self) -> Self {
+        self.count.fetch_add(1, Ordering::AcqRel);
+        AssetBarrierGuard(self.0.clone())
+    }
+}
+
+impl Drop for AssetBarrierGuard {
+    fn drop(&mut self) {
+        self.count.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+fn assets_loaded(barrier: Option<Res<AssetBarrier>>) -> bool {
+    barrier.map(|b| b.assets_remaining()) == Some(0)
+}
+
+#[derive(Debug, Default, Component, Reflect)]
+
+struct AssetLoaderNode;
+
+#[derive(Debug, Default, Component, Reflect)]
+struct AssetLoaderText;
+
+fn asset_loader_update(
+    asset_barrier: Res<AssetBarrier>,
+    mut commands: Commands,
+    q_loader_node: Query<Entity, With<AssetLoaderNode>>,
+    mut q_text: Query<&mut Text, With<AssetLoaderText>>,
+) {
+    match asset_barrier.assets_remaining() {
+        0 => {
+            commands.remove_resource::<AssetBarrier>();
+            let Ok(loader_node) = q_loader_node.get_single() else {
+                return;
+            };
+            commands.entity(loader_node).despawn_recursive();
+        }
+        n => {
+            let Ok(mut text) = q_text.get_single_mut() else {
+                return;
+            };
+            **text = format!("loading assets: {n} remaining");
+        }
+    }
+}
+
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -1022,14 +1100,37 @@ fn setup(
 
     commands.spawn(CubehelixBundle::new(player));
 
+    let asset_guard;
+    commands.insert_resource({
+        let barrier;
+        (barrier, asset_guard) = AssetBarrier::new();
+        barrier
+    });
+
+    commands
+        .spawn((AssetLoaderNode, Node {
+            width: Val::Percent(100.),
+            height: Val::Percent(100.),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        }))
+        .with_children(|parent| {
+            parent.spawn(Node { ..default() }).with_child((
+                AssetLoaderText,
+                Text::new("loading assets"),
+                TextFont::from_font_size(50.),
+            ));
+        });
+
     commands.insert_resource({
         let fox_paw_images = FOX_PAW_IMAGES
             .iter()
-            .map(|&path| asset_server.load(path))
+            .map(|&path| asset_server.load_acquire(path, asset_guard.clone()))
             .collect();
-        let borders = asset_server.load("fantasy_ui_border_sheet.png");
-        let slider = asset_server.load("slider.png");
-        let font = asset_server.load("FiraSans-Medium.ttf");
+        let borders = asset_server.load_acquire("fantasy_ui_border_sheet.png", asset_guard.clone());
+        let slider = asset_server.load_acquire("slider.png", asset_guard.clone());
+        let font = asset_server.load_acquire("FiraSans-Medium.ttf", asset_guard.clone());
         let atlas_layout = TextureAtlasLayout::from_grid(
             UVec2::splat(48),
             6,
@@ -1044,6 +1145,7 @@ fn setup(
             sides_scale_mode: SliceScaleMode::Stretch,
             max_corner_scale: 1.0,
         };
+
         AppAssets {
             fox_paw_images,
             borders,
