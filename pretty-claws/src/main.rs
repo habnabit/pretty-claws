@@ -2,7 +2,8 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-#![feature(try_blocks, cmp_minmax, lazy_get)]
+#![feature(try_blocks)]
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod animation;
 
@@ -31,8 +32,17 @@ use uuid::Uuid;
 fn main() {
     let mut app = App::new();
 
-    app.add_plugins(DefaultPlugins)
-        .add_plugins(UiMaterialPlugin::<ColorGradientMaterial>::default())
+    app.add_plugins({
+        DefaultPlugins.build().set(WindowPlugin {
+            primary_window: Some(Window {
+                fit_canvas_to_parent: true,
+                ..default()
+            }),
+            ..default()
+        })
+    });
+
+    app.add_plugins(UiMaterialPlugin::<ColorGradientMaterial>::default())
         .init_resource::<SeededRng>()
         .init_state::<ColorState>()
         // .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
@@ -97,7 +107,7 @@ struct AppAssets {
 
 impl AppAssets {
     fn make_borders(&self, index: usize, color: Color) -> ImageNode {
-        ImageNode::from_atlas_image(self.borders.clone(), TextureAtlas {
+        ImageNode::from_atlas_image(self.borders.clone_weak(), TextureAtlas {
             index,
             layout: self.border_atlas_layout.clone(),
         })
@@ -197,7 +207,7 @@ fn spawn_fox_paws(
         parent
             .spawn((
                 Sprite {
-                    image: assets.fox_paw_images[0].clone(),
+                    image: assets.fox_paw_images[0].clone_weak(),
                     flip_x,
                     custom_size: Some(FOX_PAW_SIZE),
                     ..default()
@@ -209,7 +219,7 @@ fn spawn_fox_paws(
                 for (e, image) in (&assets.fox_paw_images[1..]).into_iter().enumerate() {
                     parent.spawn((
                         Sprite {
-                            image: image.clone(),
+                            image: image.clone_weak(),
                             flip_x,
                             custom_size: Some(FOX_PAW_SIZE),
                             ..default()
@@ -752,8 +762,8 @@ fn color_clicked(
                                             color2,
                                             color3,
                                             color_selected: color.to_vec4(),
-                                            slider: assets.slider.clone(),
-                                            slider_position: current,
+                                            slider: assets.slider.clone_weak(),
+                                            slider_position: Vec4::splat(current),
                                         })),
                                     ))
                                     .with_child((
@@ -795,7 +805,7 @@ struct ColorGradientMaterial {
     #[sampler(4)]
     slider: Handle<Image>,
     #[uniform(6)]
-    slider_position: f32,
+    slider_position: Vec4,
 }
 
 fn gradient_drag(
@@ -881,7 +891,7 @@ fn update_gradient(
             continue;
         };
         (mat.color1, mat.color2, mat.color3) = attr_picker.attr.derive_poles_vec4(picker.color);
-        mat.slider_position = attr_picker.current;
+        mat.slider_position[0] = attr_picker.current;
         mat.color_selected = picker.color.to_vec4();
     }
 }
