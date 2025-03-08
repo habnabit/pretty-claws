@@ -36,6 +36,7 @@ fn main() {
         DefaultPlugins.build().set(WindowPlugin {
             primary_window: Some(Window {
                 fit_canvas_to_parent: true,
+                title: "pretty claws".into(),
                 ..default()
             }),
             ..default()
@@ -250,10 +251,7 @@ fn spawn_fox_paws(
         });
 }
 
-fn place_fox_paws(
-    mut q_paws: Query<&mut Transform, With<FoxPaws>>,
-    q_camera: Query<&Camera, Changed<Camera>>,
-) {
+fn place_fox_paws(mut q_paws: Query<&mut Transform, With<FoxPaws>>, q_camera: Query<Ref<Camera>>) {
     let Ok(camera) = q_camera.get_single() else {
         return;
     };
@@ -263,16 +261,19 @@ fn place_fox_paws(
     let Ok(mut paws) = q_paws.get_single_mut() else {
         return;
     };
-    let paws_box_inset = viewport.width() / 3.;
-    let paws_rect = Rect::new(
-        viewport.min.x + paws_box_inset,
-        viewport.min.y,
-        viewport.max.x,
-        viewport.max.y,
-    );
-    let paws_loc = paws_rect.center() - viewport.center();
-    paws.translation.x = paws_loc.x;
-    paws.translation.y = paws_loc.y;
+
+    if camera.is_changed() || paws.is_added() {
+        let paws_box_inset = viewport.width() / 3.;
+        let paws_rect = Rect::new(
+            viewport.min.x + paws_box_inset,
+            viewport.min.y,
+            viewport.max.x,
+            viewport.max.y,
+        );
+        let paws_loc = paws_rect.center() - viewport.center();
+        paws.translation.x = paws_loc.x;
+        paws.translation.y = paws_loc.y;
+    }
 }
 
 fn spin_fox_paws(
