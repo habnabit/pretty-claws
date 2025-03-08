@@ -81,6 +81,12 @@ fn main() {
                     .run_if(assets_loaded.and(run_once)),
                 spin_fox_paws.run_if(input_just_pressed(KeyCode::KeyS)),
                 update_cubehelix_color,
+                (
+                    adjust_color_weight_clicked,
+                    total_color_weights,
+                    show_color_caption,
+                )
+                    .chain(),
             ),
         )
         .add_systems(OnEnter(ColorState::Rainbow), apply_cubehelix)
@@ -425,6 +431,9 @@ struct PickButton(PickButtonAction);
 struct RemoveColorButton(Entity);
 
 #[derive(Reflect, Debug, Component, Clone)]
+struct AdjustColorWeight(Entity, isize);
+
+#[derive(Reflect, Debug, Component, Clone)]
 struct ColorsNodeArea;
 
 fn show_pick_buttons(
@@ -480,6 +489,30 @@ fn remove_pick_buttons(q_area: Query<Entity, With<StateNodeArea>>, mut commands:
 #[derive(Reflect, Debug, Component, Clone)]
 struct SelectedColor {
     selected: Color,
+    weight: usize,
+    total_weight: usize,
+    n_claws: usize,
+}
+
+impl Default for SelectedColor {
+    fn default() -> Self {
+        Self {
+            selected: Default::default(),
+            weight: 1,
+            total_weight: 1,
+            n_claws: 0,
+        }
+    }
+}
+
+impl SelectedColor {
+    fn caption(&self) -> String {
+        let pct = self.weight as f32 / self.total_weight as f32 * 100.;
+        format!(
+            "selected: {}, weight: {} in {} ≈ {:.1}%",
+            self.n_claws, self.weight, self.total_weight, pct
+        )
+    }
 }
 
 fn pick_random_color<R: Rng>(rng: &mut R) -> Color {
@@ -496,9 +529,8 @@ fn pick_random_color<R: Rng>(rng: &mut R) -> Color {
 fn pick_button_clicked(
     q_area: Query<Entity, With<ColorsNodeArea>>,
     q_buttons: Query<(&PickButton, &Interaction), Changed<Interaction>>,
-    q_colors: Query<(&SelectedColor, &Children)>,
+    mut q_colors: Query<&mut SelectedColor>,
     mut q_claws: Query<&mut Sprite, With<FoxClaw>>,
-    mut q_text: Query<&mut Text>,
     assets: Res<AppAssets>,
     mut rng: ResMut<SeededRng>,
     mut commands: Commands,
@@ -531,12 +563,15 @@ fn pick_button_clicked(
                                         padding: UiRect::all(Val::Px(2.)).with_left(Val::Px(5.)),
                                         ..default()
                                     },
-                                    SelectedColor { selected: color },
+                                    SelectedColor {
+                                        selected: color,
+                                        ..default()
+                                    },
                                     BackgroundColor(color),
                                 ))
                                 .with_child((
-                                    Text::new("0"),
-                                    assets.text_font(),
+                                    Text::new(""),
+                                    assets.text_font().with_font_size(16.),
                                     TextColor(Color::hsl(0., 0., 0.1)),
                                 ));
                             parent
@@ -567,25 +602,46 @@ fn pick_button_clicked(
             }
             PickButtonAction::Randomize => {
                 let mut colors = q_colors
-                    .iter()
-                    .map(|(color, children)| (color, children, 0usize))
+                    .iter_mut()
+                    .map(|selected| (selected, 0usize))
                     .collect::<Vec<_>>();
                 if colors.is_empty() {
                     return;
                 }
                 for mut sprite in &mut q_claws {
-                    let selection = colors.choose_mut(&mut rng.0).unwrap();
+                    let selection = colors
+                        .choose_weighted_mut(&mut rng.0, |s| s.0.weight)
+                        .unwrap();
                     sprite.color = selection.0.selected;
-                    selection.2 += 1;
+                    selection.1 += 1;
                 }
-                for (_, children, count) in colors {
-                    let Ok(mut text) = q_text.get_mut(children[0]) else {
-                        continue;
-                    };
-                    **text = format!("{count}");
+                for (mut selection, n_claws) in colors {
+                    selection.n_claws = n_claws;
                 }
             }
         }
+    }
+}
+
+fn total_color_weights(mut q_colors: Query<&mut SelectedColor>) {
+    let total_weight: usize = q_colors.iter().map(|s| s.weight).sum();
+    for mut selection in &mut q_colors {
+        if selection.bypass_change_detection().total_weight == total_weight {
+            continue;
+        }
+        selection.total_weight = total_weight;
+    }
+}
+
+fn show_color_caption(
+    q_colors: Query<(&SelectedColor, &Children), Changed<SelectedColor>>,
+    mut q_text: Query<&mut Text>,
+) {
+    for (selection, children) in &q_colors {
+        let Ok(mut text) = q_text.get_mut(children[0]) else {
+            continue;
+        };
+        **text = selection.caption();
     }
 }
 
@@ -779,6 +835,69 @@ fn color_clicked(
                                     ));
                             });
                     }
+                    parent
+                        .spawn((Node {
+                            width: Val::Percent(100.),
+                            display: Display::Grid,
+                            grid_template_columns: vec![GridTrack::auto(), GridTrack::flex(1.0)],
+                            ..default()
+                        },))
+                        .with_children(|parent| {
+                            parent
+                                .spawn((
+                                    Node {
+                                        margin: UiRect::all(Val::Px(1.)),
+                                        padding: UiRect::all(Val::Px(3.)),
+                                        width: Val::Px(60.),
+                                        justify_content: JustifyContent::Center,
+                                        align_items: AlignItems::Center,
+                                        ..default()
+                                    },
+                                    BackgroundColor(Color::hsla(0., 0., 0.9, 0.2)),
+                                ))
+                                .with_child((
+                                    Text::new("weight"),
+                                    assets.text_font().with_font_size(17.6),
+                                    TextColor(Color::hsl(0., 0., 0.1)),
+                                ));
+
+                            parent
+                                .spawn((Node {
+                                    width: Val::Percent(100.),
+                                    margin: UiRect::all(Val::Px(1.)),
+                                    justify_content: JustifyContent::FlexStart,
+                                    align_items: AlignItems::Center,
+                                    ..default()
+                                },))
+                                .with_children(|parent| {
+                                    for weight in [-1, 1] {
+                                        parent
+                                            .spawn((
+                                                Button,
+                                                AdjustColorWeight(entity, weight),
+                                                assets.make_borders(1, Color::hsl(330., 1., 0.2)),
+                                                Node {
+                                                    // height: Val::Percent(100.),
+                                                    // height: Val::Px(23.),
+                                                    width: Val::Px(23.),
+                                                    margin: UiRect::all(Val::Px(3.)),
+                                                    padding: UiRect::all(Val::Px(3.)),
+                                                    justify_content: JustifyContent::Center,
+                                                    align_items: AlignItems::Center,
+                                                    ..default()
+                                                },
+                                                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                                            ))
+                                            .with_children(|parent| {
+                                                parent.spawn((
+                                                    Text::new(format!("{weight:+}")),
+                                                    assets.text_font().with_font_size(17.),
+                                                    TextColor(Color::hsl(0., 0., 0.1)),
+                                                ));
+                                            });
+                                    }
+                                });
+                        });
                 });
         });
         local.last_picker = Some(picker);
@@ -904,6 +1023,20 @@ fn remove_color_button_clicked(
     for (button, &interaction) in &q_buttons {
         if let Interaction::Pressed = interaction {
             commands.entity(button.0).despawn_recursive();
+        }
+    }
+}
+
+fn adjust_color_weight_clicked(
+    q_buttons: Query<(&AdjustColorWeight, &Interaction), Changed<Interaction>>,
+    mut q_selected: Query<&mut SelectedColor>,
+) {
+    for (button, &interaction) in &q_buttons {
+        if let Interaction::Pressed = interaction {
+            let Ok(mut selected) = q_selected.get_mut(button.0) else {
+                continue;
+            };
+            selected.weight = selected.weight.saturating_add_signed(button.1).max(1);
         }
     }
 }
