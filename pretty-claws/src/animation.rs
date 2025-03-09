@@ -55,7 +55,7 @@ impl<C: SavedAnimationNode + Component> AnimatorPlugin<C> {
                     return;
                 };
                 let clip = build_clip(anim_from, target.id);
-                if let &mut Some(prev_node) = saved.node_mut() {
+                if let Some(prev_node) = saved.node_mut().take() {
                     graph.remove_edge(graph.root, prev_node);
                 }
                 let clip_handle = animation_clips.add(clip);
