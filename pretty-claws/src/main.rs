@@ -46,12 +46,16 @@ fn main() {
     app.add_plugins(UiMaterialPlugin::<ColorGradientMaterial>::default())
         .init_resource::<SeededRng>()
         .init_state::<ColorState>()
-        // .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         .register_asset_reflect::<ColorGradientMaterial>()
+        .register_type::<AdjustColorWeight>()
         .register_type::<AppAssets>()
+        .register_type::<AssetLoaderNode>()
+        .register_type::<AssetLoaderText>()
         .register_type::<ColorPicker>()
         .register_type::<ColorPickerAttribute>()
+        .register_type::<ColorsNodeArea>()
         .register_type::<ColorState>()
+        .register_type::<ColorStateButton>()
         .register_type::<CubehelixAnimationNode>()
         .register_type::<CubehelixClaw>()
         .register_type::<CubehelixRoot>()
@@ -59,6 +63,10 @@ fn main() {
         .register_type::<FoxPaw>()
         .register_type::<FoxPaws>()
         .register_type::<FoxPawsSpinNode>()
+        .register_type::<HslaAttribute>()
+        .register_type::<PickButton>()
+        .register_type::<PickButtonAction>()
+        .register_type::<RemoveColorButton>()
         .register_type::<SeededRng>()
         .register_type::<SelectedColor>()
         .register_type::<StateNodeArea>()
@@ -94,7 +102,10 @@ fn main() {
         .add_systems(OnEnter(ColorState::Pick), show_pick_buttons)
         .add_systems(OnExit(ColorState::Pick), remove_pick_buttons);
 
-    for &state in &[ColorState::Rainbow, ColorState::Pick] {
+    #[cfg(feature = "inspect")]
+    app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new());
+
+    for &state in ColorState::BUTTONS {
         app.add_systems(OnEnter(state), set_button_background);
     }
 
@@ -126,6 +137,13 @@ impl AppAssets {
         TextFont::from_font(self.font.clone_weak())
     }
 }
+
+const DEFAULT_BACKGROUND_COLOR: BackgroundColor = BackgroundColor(Color::hsla(0., 0., 0.5, 0.8));
+const PICKER_BACKGROUND_COLOR: BackgroundColor = BackgroundColor(Color::hsla(0., 0., 0.9, 0.2));
+const DEFAULT_TEXT_COLOR: TextColor = TextColor(Color::hsl(0., 0., 0.1));
+const BUTTON_BORDER_COLOR: Color = Color::hsl(330., 1., 0.2);
+const STATE_BUTTON_SELECTED_BACKGROUND: Color = Color::hsla(330., 0.8, 0.9, 0.8);
+const STATE_BUTTON_BACKGROUND: Color = Color::hsla(0., 0., 0.7, 0.8);
 
 #[derive(Resource, Reflect)]
 #[reflect(Resource)]
@@ -319,6 +337,10 @@ enum ColorState {
     Pick,
 }
 
+impl ColorState {
+    const BUTTONS: &[ColorState] = &[ColorState::Rainbow, ColorState::Pick];
+}
+
 #[derive(Reflect, Debug, Component, Clone)]
 struct ColorStateButton(ColorState);
 
@@ -328,9 +350,9 @@ fn set_button_background(
 ) {
     for (button, mut bg) in &mut q_buttons {
         let color = if color_state.get() == &button.0 {
-            Color::hsla(330., 0.8, 0.9, 0.8)
+            STATE_BUTTON_SELECTED_BACKGROUND
         } else {
-            Color::hsla(0., 0., 0.7, 0.8)
+            STATE_BUTTON_BACKGROUND
         };
         bg.0 = color;
     }
@@ -341,9 +363,9 @@ fn set_button_border(
 ) {
     for (&interaction, mut image) in &mut q_buttons {
         let color = match interaction {
-            Interaction::Pressed => Color::hsl(300., 1., 0.65),
-            Interaction::Hovered => Color::hsl(330., 1., 0.55),
-            Interaction::None => Color::hsl(330., 1., 0.2),
+            Interaction::Pressed => BUTTON_BORDER_COLOR.lighter(0.45),
+            Interaction::Hovered => BUTTON_BORDER_COLOR.lighter(0.2),
+            Interaction::None => BUTTON_BORDER_COLOR,
         };
         image.color = color;
     }
@@ -377,18 +399,18 @@ fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
                 grid_template_columns: vec![GridTrack::auto()],
                 ..default()
             },
-            BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+            DEFAULT_BACKGROUND_COLOR,
         ))
         .with_children(|parent| {
             parent
                 .spawn((Node { ..default() },))
                 .with_children(|parent| {
-                    for &state in &[ColorState::Rainbow, ColorState::Pick] {
+                    for &state in ColorState::BUTTONS {
                         parent
                             .spawn((
                                 ColorStateButton(state),
                                 Button,
-                                assets.make_borders(8, Color::hsl(330., 1., 0.2)),
+                                assets.make_borders(8, BUTTON_BORDER_COLOR),
                                 Node {
                                     width: Val::Percent(100.),
                                     justify_content: JustifyContent::Center,
@@ -397,13 +419,13 @@ fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
                                     padding: UiRect::all(Val::Px(10.)),
                                     ..default()
                                 },
-                                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                                DEFAULT_BACKGROUND_COLOR,
                             ))
                             .with_children(|parent| {
                                 parent.spawn((
                                     Text::new(format!("{state:?}")),
                                     assets.text_font(),
-                                    TextColor(Color::hsl(0., 0., 0.1)),
+                                    DEFAULT_TEXT_COLOR,
                                 ));
                             });
                     }
@@ -422,6 +444,17 @@ fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
 enum PickButtonAction {
     AddColor,
     Randomize,
+}
+
+impl PickButtonAction {
+    const ALL: &[PickButtonAction] = &[PickButtonAction::AddColor, PickButtonAction::Randomize];
+
+    fn caption(&self) -> &'static str {
+        match *self {
+            PickButtonAction::AddColor => "Add color",
+            PickButtonAction::Randomize => "Randomize",
+        }
+    }
 }
 
 #[derive(Reflect, Debug, Component, Clone)]
@@ -445,12 +478,12 @@ fn show_pick_buttons(
         return;
     };
     commands.entity(area).with_children(|parent| {
-        for &action in &[PickButtonAction::AddColor, PickButtonAction::Randomize] {
+        for &action in PickButtonAction::ALL {
             parent
                 .spawn((
                     Button,
                     PickButton(action),
-                    assets.make_borders(8, Color::hsl(330., 1., 0.2)),
+                    assets.make_borders(8, BUTTON_BORDER_COLOR),
                     Node {
                         margin: UiRect::horizontal(Val::Px(5.)).with_bottom(Val::Px(5.)),
                         padding: UiRect::all(Val::Px(10.)),
@@ -458,13 +491,13 @@ fn show_pick_buttons(
                         align_items: AlignItems::Center,
                         ..default()
                     },
-                    BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                    DEFAULT_BACKGROUND_COLOR,
                 ))
                 .with_children(|parent| {
                     parent.spawn((
-                        Text::new(format!("{action:?}")),
+                        Text::new(action.caption()),
                         assets.text_font(),
-                        TextColor(Color::hsl(0., 0., 0.1)),
+                        DEFAULT_TEXT_COLOR,
                     ));
                 });
         }
@@ -572,29 +605,27 @@ fn pick_button_clicked(
                                 .with_child((
                                     Text::new(""),
                                     assets.text_font().with_font_size(16.),
-                                    TextColor(Color::hsl(0., 0., 0.1)),
+                                    DEFAULT_TEXT_COLOR,
                                 ));
                             parent
                                 .spawn((
                                     Button,
                                     RemoveColorButton(color_node),
-                                    assets.make_borders(1, Color::hsl(330., 1., 0.2)),
+                                    assets.make_borders(1, BUTTON_BORDER_COLOR),
                                     Node {
-                                        // height: Val::Percent(100.),
-                                        // height: Val::Px(23.),
                                         width: Val::Px(23.),
-                                        margin: UiRect::all(Val::Px(2.)),
+                                        margin: UiRect::all(Val::Px(2.)).with_left(Val::Px(5.)),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
                                         ..default()
                                     },
-                                    BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
+                                    DEFAULT_BACKGROUND_COLOR,
                                 ))
                                 .with_children(|parent| {
                                     parent.spawn((
                                         Text::new("x"),
                                         assets.text_font().with_font_size(14.),
-                                        TextColor(Color::hsl(0., 0., 0.1)),
+                                        DEFAULT_TEXT_COLOR,
                                     ));
                                 });
                         });
@@ -664,6 +695,12 @@ enum HslaAttribute {
 }
 
 impl HslaAttribute {
+    const ALL: &[HslaAttribute] = &[
+        HslaAttribute::Hue,
+        HslaAttribute::Saturation,
+        HslaAttribute::Lightness,
+    ];
+
     fn derive_poles(&self, color: Hsla) -> (Hsla, Hsla, Hsla) {
         (
             self.with_current(0., color),
@@ -708,14 +745,6 @@ impl HslaAttribute {
             HslaAttribute::Lightness => color.with_lightness(v),
         }
     }
-}
-
-impl HslaAttribute {
-    const ALL: &[HslaAttribute] = &[
-        HslaAttribute::Hue,
-        HslaAttribute::Saturation,
-        HslaAttribute::Lightness,
-    ];
 }
 
 #[derive(Debug, Clone, Component, Reflect)]
@@ -772,7 +801,8 @@ fn color_clicked(
                         parent
                             .spawn((
                                 Node {
-                                    width: Val::Percent(100.),
+                                    left: Val::Percent(2.),
+                                    width: Val::Percent(96.),
                                     display: Display::Grid,
                                     grid_template_columns: vec![
                                         GridTrack::auto(),
@@ -797,12 +827,12 @@ fn color_clicked(
                                             align_items: AlignItems::Center,
                                             ..default()
                                         },
-                                        BackgroundColor(Color::hsla(0., 0., 0.9, 0.2)),
+                                        PICKER_BACKGROUND_COLOR,
                                     ))
                                     .with_child((
                                         Text::new(attr.short_name()),
                                         assets.text_font(),
-                                        TextColor(Color::hsl(0., 0., 0.1)),
+                                        DEFAULT_TEXT_COLOR,
                                     ));
                                 parent
                                     .spawn((
@@ -830,16 +860,21 @@ fn color_clicked(
                                         },
                                         Text::new(attr.format_current(color)),
                                         assets.text_font().with_font_size(13.),
-                                        TextColor(Color::hsl(0., 0., 0.1)),
+                                        DEFAULT_TEXT_COLOR,
                                         BackgroundColor(Color::hsla(0., 0., 0.9, 0.5)),
                                     ));
                             });
                     }
                     parent
                         .spawn((Node {
-                            width: Val::Percent(100.),
+                            left: Val::Percent(2.),
+                            width: Val::Percent(96.),
                             display: Display::Grid,
-                            grid_template_columns: vec![GridTrack::auto(), GridTrack::flex(1.0)],
+                            grid_template_columns: vec![
+                                GridTrack::auto(),
+                                GridTrack::flex(1.0),
+                                GridTrack::flex(1.0),
+                            ],
                             ..default()
                         },))
                         .with_children(|parent| {
@@ -848,55 +883,41 @@ fn color_clicked(
                                     Node {
                                         margin: UiRect::all(Val::Px(1.)),
                                         padding: UiRect::all(Val::Px(3.)),
-                                        width: Val::Px(60.),
                                         justify_content: JustifyContent::Center,
                                         align_items: AlignItems::Center,
                                         ..default()
                                     },
-                                    BackgroundColor(Color::hsla(0., 0., 0.9, 0.2)),
+                                    PICKER_BACKGROUND_COLOR,
                                 ))
                                 .with_child((
                                     Text::new("weight"),
                                     assets.text_font().with_font_size(17.6),
-                                    TextColor(Color::hsl(0., 0., 0.1)),
+                                    DEFAULT_TEXT_COLOR,
                                 ));
 
-                            parent
-                                .spawn((Node {
-                                    width: Val::Percent(100.),
-                                    margin: UiRect::all(Val::Px(1.)),
-                                    justify_content: JustifyContent::FlexStart,
-                                    align_items: AlignItems::Center,
-                                    ..default()
-                                },))
-                                .with_children(|parent| {
-                                    for weight in [-1, 1] {
-                                        parent
-                                            .spawn((
-                                                Button,
-                                                AdjustColorWeight(entity, weight),
-                                                assets.make_borders(1, Color::hsl(330., 1., 0.2)),
-                                                Node {
-                                                    // height: Val::Percent(100.),
-                                                    // height: Val::Px(23.),
-                                                    width: Val::Px(23.),
-                                                    margin: UiRect::all(Val::Px(3.)),
-                                                    padding: UiRect::all(Val::Px(3.)),
-                                                    justify_content: JustifyContent::Center,
-                                                    align_items: AlignItems::Center,
-                                                    ..default()
-                                                },
-                                                BackgroundColor(Color::hsla(0., 0., 0.5, 0.8)),
-                                            ))
-                                            .with_children(|parent| {
-                                                parent.spawn((
-                                                    Text::new(format!("{weight:+}")),
-                                                    assets.text_font().with_font_size(17.),
-                                                    TextColor(Color::hsl(0., 0., 0.1)),
-                                                ));
-                                            });
-                                    }
-                                });
+                            for weight in [-1, 1] {
+                                parent
+                                    .spawn((
+                                        Button,
+                                        AdjustColorWeight(entity, weight),
+                                        assets.make_borders(1, BUTTON_BORDER_COLOR),
+                                        Node {
+                                            margin: UiRect::all(Val::Px(3.)),
+                                            padding: UiRect::all(Val::Px(3.)),
+                                            justify_content: JustifyContent::Center,
+                                            align_items: AlignItems::Center,
+                                            ..default()
+                                        },
+                                        DEFAULT_BACKGROUND_COLOR,
+                                    ))
+                                    .with_children(|parent| {
+                                        parent.spawn((
+                                            Text::new(format!("{weight:+}")),
+                                            assets.text_font().with_font_size(17.),
+                                            DEFAULT_TEXT_COLOR,
+                                        ));
+                                    });
+                            }
                         });
                 });
         });
