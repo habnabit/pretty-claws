@@ -19,8 +19,12 @@ use animation::{AnimatorPlugin, SavedAnimationNode};
 use bevy::{
     animation::{animated_field, AnimationTarget, AnimationTargetId, RepeatAnimation},
     input::common_conditions::input_just_pressed,
+    picking::pointer::Location,
     prelude::*,
-    render::render_resource::{AsBindGroup, ShaderRef},
+    render::{
+        camera::NormalizedRenderTarget,
+        render_resource::{AsBindGroup, ShaderRef},
+    },
     ui::widget::NodeImageMode,
     window::PrimaryWindow,
 };
@@ -71,7 +75,8 @@ fn main() {
         .register_type::<SelectedColor>()
         .register_type::<StateNodeArea>()
         .add_observer(animate_cubehelix)
-        .add_observer(gradient_drag)
+        .add_observer(gradient_drag::<Pointer<Click>>)
+        .add_observer(gradient_drag::<Pointer<Move>>)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -949,10 +954,62 @@ struct ColorGradientMaterial {
     slider_position: Vec4,
 }
 
-fn gradient_drag(
-    _ev: Trigger<Pointer<Move>>,
-    q_camera: Query<&Camera>,
-    q_window: Query<&Window, With<PrimaryWindow>>,
+enum BarInteraction {
+    Never,
+    Always,
+    OnOverlap,
+}
+
+trait PointerLocation {
+    fn should_interact(&self, interaction: Interaction) -> BarInteraction;
+    fn location(&self) -> &Location;
+}
+
+impl PointerLocation for Pointer<Click> {
+    fn should_interact(&self, interaction: Interaction) -> BarInteraction {
+        if interaction == Interaction::Hovered {
+            BarInteraction::Always
+        } else {
+            BarInteraction::OnOverlap
+        }
+    }
+
+    fn location(&self) -> &Location {
+        &self.pointer_location
+    }
+}
+
+impl PointerLocation for Pointer<Down> {
+    fn should_interact(&self, interaction: Interaction) -> BarInteraction {
+        if interaction == Interaction::Hovered {
+            BarInteraction::Always
+        } else {
+            BarInteraction::OnOverlap
+        }
+    }
+
+    fn location(&self) -> &Location {
+        &self.pointer_location
+    }
+}
+
+impl PointerLocation for Pointer<Move> {
+    fn should_interact(&self, interaction: Interaction) -> BarInteraction {
+        if interaction == Interaction::Pressed {
+            BarInteraction::Always
+        } else {
+            BarInteraction::Never
+        }
+    }
+
+    fn location(&self) -> &Location {
+        &self.pointer_location
+    }
+}
+
+fn gradient_drag<E: PointerLocation + std::fmt::Debug>(
+    ev: Trigger<E>,
+    q_window: Query<&Window>,
     mut q_selected: Query<(&mut SelectedColor, &mut BackgroundColor)>,
     mut q_picker: Query<&mut ColorPicker>,
     mut q_parent: Query<&mut ColorPickerAttribute>,
@@ -968,24 +1025,33 @@ fn gradient_drag(
         With<MaterialNode<ColorGradientMaterial>>,
     >,
 ) {
-    let Some(physical_viewport) = q_camera
-        .get_single()
-        .ok()
-        .and_then(|c| c.physical_viewport_rect())
-    else {
-        return;
-    };
-    let Ok(window) = q_window.get_single() else {
-        return;
-    };
-    let Some(physical_cursor_position) = window.physical_cursor_position() else {
-        return;
-    };
-    let cursor_position = physical_cursor_position - physical_viewport.min.as_vec2();
     for (&interaction, parent, children, node, global_transform) in &q_nodes {
-        if interaction != Interaction::Pressed {
+        let test_overlap = match ev.should_interact(interaction) {
+            BarInteraction::Never => continue,
+            BarInteraction::Always => false,
+            BarInteraction::OnOverlap => true,
+        };
+        let loc = ev.location();
+        let NormalizedRenderTarget::Window(window) = loc.target else {
+            continue;
+        };
+        let Ok(window) = q_window.get(window.entity()) else {
+            return;
+        };
+        let pointer_loc = loc.position * window.scale_factor();
+        // info!("event: {ev:?}");
+        let node_size = node.size();
+        // factor out slider size
+        let slider_width = node_size.y / 34. * 21.;
+        let bar_size = node_size - Vec2::new(slider_width, 0.);
+        let bar_rect = Rect::from_center_size(
+            global_transform.compute_transform().translation.xy(),
+            bar_size,
+        );
+        if test_overlap && !bar_rect.contains(pointer_loc) {
             continue;
         }
+        let current = ((pointer_loc.x - bar_rect.min.x) / bar_size.x).clamp(0., 1.);
         let Ok(mut attr_picker) = q_parent.get_mut(**parent) else {
             continue;
         };
@@ -995,12 +1061,6 @@ fn gradient_drag(
         let Ok(mut selected) = q_selected.get_mut(picker.source) else {
             continue;
         };
-        let node_size = node.size();
-        let node_rect = Rect::from_center_size(
-            global_transform.compute_transform().translation.xy(),
-            node_size,
-        );
-        let current = ((cursor_position.x - node_rect.min.x) / node_size.x).clamp(0., 1.);
         // too many updates in one system
         attr_picker.current = current;
         picker.color = attr_picker.attr.with_current(current, picker.color);
