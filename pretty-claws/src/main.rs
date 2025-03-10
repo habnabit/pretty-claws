@@ -75,6 +75,7 @@ fn main() {
         .register_type::<SelectedColor>()
         .register_type::<StateNodeArea>()
         .add_observer(animate_cubehelix)
+        .add_observer(click_spin_fox_paws)
         .add_observer(gradient_drag::<Pointer<Click>>)
         .add_observer(gradient_drag::<Pointer<Move>>)
         .add_systems(Startup, setup)
@@ -102,7 +103,6 @@ fn main() {
                     .chain(),
             ),
         )
-        .add_observer(click_spin_fox_paws)
         .add_systems(OnEnter(ColorState::Rainbow), apply_cubehelix)
         .add_systems(OnExit(ColorState::Rainbow), remove_cubehelix)
         .add_systems(OnEnter(ColorState::Pick), show_pick_buttons)
