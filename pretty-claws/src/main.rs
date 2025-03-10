@@ -102,6 +102,7 @@ fn main() {
                     .chain(),
             ),
         )
+        .add_observer(click_spin_fox_paws)
         .add_systems(OnEnter(ColorState::Rainbow), apply_cubehelix)
         .add_systems(OnExit(ColorState::Rainbow), remove_cubehelix)
         .add_systems(OnEnter(ColorState::Pick), show_pick_buttons)
@@ -332,6 +333,18 @@ fn spin_fox_paws(
             clip
         },
     );
+}
+
+fn click_spin_fox_paws(
+    mut ev: Trigger<Pointer<Click>>,
+    q_paw: Query<&FoxPaw>,
+    q_paws: Query<(Entity, &mut FoxPaws), With<AnimationTarget>>,
+    commands: Commands,
+) {
+    if q_paw.contains(ev.entity()) && ev.event().hit.position.is_some() {
+        spin_fox_paws(q_paws, commands);
+        ev.propagate(false);
+    }
 }
 
 #[derive(States, Reflect, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
