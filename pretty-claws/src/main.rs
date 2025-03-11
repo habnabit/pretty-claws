@@ -474,7 +474,10 @@ fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
         ))
         .with_children(|parent| {
             parent
-                .spawn((Node { ..default() },))
+                .spawn((Node {
+                    margin: UiRect::horizontal(Val::Px(2.)).with_top(Val::Px(3.)),
+                    ..default()
+                },))
                 .with_children(|parent| {
                     for &state in ColorState::BUTTONS {
                         parent
@@ -486,8 +489,8 @@ fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
                                     width: Val::Percent(100.),
                                     justify_content: JustifyContent::Center,
                                     align_items: AlignItems::Center,
-                                    margin: UiRect::all(Val::Px(10.)),
-                                    padding: UiRect::all(Val::Px(10.)),
+                                    margin: UiRect::all(Val::Px(2.)),
+                                    padding: UiRect::all(Val::Px(7.)),
                                     ..default()
                                 },
                                 DEFAULT_BACKGROUND_COLOR,
@@ -495,7 +498,7 @@ fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
                             .with_children(|parent| {
                                 parent.spawn((
                                     Text::new(format!("{state:?}")),
-                                    assets.text_font(),
+                                    assets.text_font().with_font_size(19.),
                                     DEFAULT_TEXT_COLOR,
                                 ));
                             });
@@ -551,6 +554,7 @@ fn show_pick_buttons(
     commands.entity(area).with_children(|parent| {
         parent
             .spawn(Node {
+                margin: UiRect::horizontal(Val::Px(7.)).with_bottom(Val::Px(5.)),
                 display: Display::Grid,
                 grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::flex(1.0)],
                 ..default()
@@ -563,8 +567,8 @@ fn show_pick_buttons(
                             PickButton(action),
                             assets.make_borders(8, BUTTON_BORDER_COLOR),
                             Node {
-                                margin: UiRect::horizontal(Val::Px(5.)).with_bottom(Val::Px(5.)),
-                                padding: UiRect::all(Val::Px(10.)),
+                                margin: UiRect::all(Val::Px(2.)),
+                                padding: UiRect::all(Val::Px(7.)),
                                 justify_content: JustifyContent::Center,
                                 align_items: AlignItems::Center,
                                 ..default()
@@ -574,7 +578,7 @@ fn show_pick_buttons(
                         .with_children(|parent| {
                             parent.spawn((
                                 Text::new(action.caption()),
-                                assets.text_font(),
+                                assets.text_font().with_font_size(15.5),
                                 DEFAULT_TEXT_COLOR,
                             ));
                         });
@@ -911,7 +915,7 @@ fn color_clicked(
                                     ))
                                     .with_child((
                                         Text::new(attr.short_name()),
-                                        assets.text_font(),
+                                        assets.text_font().with_font_size(21.),
                                         DEFAULT_TEXT_COLOR,
                                     ));
                                 parent
@@ -971,7 +975,7 @@ fn color_clicked(
                                 ))
                                 .with_child((
                                     Text::new("weight"),
-                                    assets.text_font().with_font_size(17.6),
+                                    assets.text_font().with_font_size(17.5),
                                     DEFAULT_TEXT_COLOR,
                                 ));
 
