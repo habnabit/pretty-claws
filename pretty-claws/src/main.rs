@@ -549,29 +549,37 @@ fn show_pick_buttons(
         return;
     };
     commands.entity(area).with_children(|parent| {
-        for &action in PickButtonAction::ALL {
-            parent
-                .spawn((
-                    Button,
-                    PickButton(action),
-                    assets.make_borders(8, BUTTON_BORDER_COLOR),
-                    Node {
-                        margin: UiRect::horizontal(Val::Px(5.)).with_bottom(Val::Px(5.)),
-                        padding: UiRect::all(Val::Px(10.)),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    DEFAULT_BACKGROUND_COLOR,
-                ))
-                .with_children(|parent| {
-                    parent.spawn((
-                        Text::new(action.caption()),
-                        assets.text_font(),
-                        DEFAULT_TEXT_COLOR,
-                    ));
-                });
-        }
+        parent
+            .spawn(Node {
+                display: Display::Grid,
+                grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::flex(1.0)],
+                ..default()
+            })
+            .with_children(|parent| {
+                for &action in PickButtonAction::ALL {
+                    parent
+                        .spawn((
+                            Button,
+                            PickButton(action),
+                            assets.make_borders(8, BUTTON_BORDER_COLOR),
+                            Node {
+                                margin: UiRect::horizontal(Val::Px(5.)).with_bottom(Val::Px(5.)),
+                                padding: UiRect::all(Val::Px(10.)),
+                                justify_content: JustifyContent::Center,
+                                align_items: AlignItems::Center,
+                                ..default()
+                            },
+                            DEFAULT_BACKGROUND_COLOR,
+                        ))
+                        .with_children(|parent| {
+                            parent.spawn((
+                                Text::new(action.caption()),
+                                assets.text_font(),
+                                DEFAULT_TEXT_COLOR,
+                            ));
+                        });
+                }
+            });
         parent.spawn((
             Node {
                 flex_direction: FlexDirection::Column,
@@ -856,7 +864,8 @@ fn color_clicked(
                 .spawn((
                     Node {
                         grid_column: GridPlacement::span(2),
-                        flex_direction: FlexDirection::Column,
+                        display: Display::Grid,
+                        grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::flex(1.0)],
                         ..default()
                     },
                     ColorPicker {
