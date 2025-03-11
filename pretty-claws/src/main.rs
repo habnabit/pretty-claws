@@ -82,6 +82,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                animation::clear_unused_animation_graphs,
                 set_button_border,
                 state_button_clicked,
                 pick_button_clicked,
@@ -226,13 +227,16 @@ impl SavedAnimationNode for FoxPawsSpinNode {
 }
 
 fn spawn_fox_paws(
-    q_player: Query<Entity, With<AnimationPlayer>>,
     assets: Res<AppAssets>,
+    mut animation_graphs: ResMut<Assets<AnimationGraph>>,
     mut commands: Commands,
 ) {
-    let Ok(player) = q_player.get_single() else {
-        return;
-    };
+    let player = commands
+        .spawn((
+            AnimationPlayer::default(),
+            AnimationGraphHandle(animation_graphs.add(AnimationGraph::new())),
+        ))
+        .id();
     let spawn = |parent: &mut ChildBuilder, paw: FoxPaw, transform| {
         let flip_x = paw.flip_x_p();
         parent

@@ -76,3 +76,23 @@ impl<C: SavedAnimationNode + Component> AnimatorPlugin<C> {
         );
     }
 }
+
+pub fn clear_unused_animation_graphs(
+    q_animations: Query<
+        (Entity, &AnimationGraphHandle, &AnimationPlayer),
+        Changed<AnimationPlayer>,
+    >,
+    mut animation_graphs: ResMut<Assets<AnimationGraph>>,
+    mut commands: Commands,
+) {
+    for (entity, graph_handle, player) in &q_animations {
+        let Some(graph) = animation_graphs.get_mut(graph_handle.id()) else {
+            continue;
+        };
+        if graph.graph.edge_count() > 0 && player.all_finished() {
+            info!("resetting {graph:?}");
+            *graph = default();
+            commands.entity(entity).insert(AnimationPlayer::default());
+        }
+    }
+}
