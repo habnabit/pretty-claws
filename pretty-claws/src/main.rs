@@ -197,6 +197,13 @@ impl FoxPaw {
             FoxPaw::Right => false,
         }
     }
+
+    fn direction(&self) -> Vec3 {
+        match self {
+            FoxPaw::Left => Vec3::new(-1., 1., 1.),
+            FoxPaw::Right => Vec3::new(1., 1., 1.),
+        }
+    }
 }
 
 #[derive(Debug, Component, Reflect)]
@@ -237,7 +244,7 @@ fn spawn_fox_paws(
             AnimationGraphHandle(animation_graphs.add(AnimationGraph::new())),
         ))
         .id();
-    let spawn = |parent: &mut ChildBuilder, paw: FoxPaw, transform| {
+    let spawn = |parent: &mut ChildBuilder, paw: FoxPaw| {
         let flip_x = paw.flip_x_p();
         parent
             .spawn((
@@ -247,7 +254,7 @@ fn spawn_fox_paws(
                     custom_size: Some(FOX_PAW_SIZE),
                     ..default()
                 },
-                transform,
+                Transform::from_translation(Vec3::new(100., 0., 0.) * paw.direction()),
                 paw,
             ))
             .with_children(|parent| {
@@ -280,12 +287,20 @@ fn spawn_fox_paws(
             InheritedVisibility::VISIBLE,
         ))
         .with_children(|parent| {
-            spawn(parent, FoxPaw::Left, Transform::from_xyz(-100., 0., 0.));
-            spawn(parent, FoxPaw::Right, Transform::from_xyz(100., 0., 0.));
+            spawn(parent, FoxPaw::Left);
+            spawn(parent, FoxPaw::Right);
         });
 }
 
-fn place_fox_paws(mut q_paws: Query<&mut Transform, With<FoxPaws>>, q_camera: Query<Ref<Camera>>) {
+fn place_fox_paws(
+    mut q_paws: Query<&mut Transform, (With<FoxPaws>, Without<FoxPaw>, Without<FoxClaw>)>,
+    q_camera: Query<Ref<Camera>>,
+    mut q_paw_sprite: Query<
+        (&mut Sprite, &mut Transform, &FoxPaw),
+        (Without<FoxPaws>, Without<FoxClaw>),
+    >,
+    mut q_claw_sprite: Query<&mut Sprite, (With<FoxClaw>, Without<FoxPaw>, Without<FoxPaws>)>,
+) {
     let Ok(camera) = q_camera.get_single() else {
         return;
     };
@@ -307,6 +322,19 @@ fn place_fox_paws(mut q_paws: Query<&mut Transform, With<FoxPaws>>, q_camera: Qu
         let paws_loc = paws_rect.center() - viewport.center();
         paws.translation.x = paws_loc.x;
         paws.translation.y = paws_loc.y;
+        let paw_width = paws_rect.width() * 0.3;
+        let paw_height = paw_width * FOX_PAW_SIZE.y / FOX_PAW_SIZE.x;
+        let paw_sprite_size = Vec2::new(paw_width, paw_height);
+        for (_, mut transform, paw) in &mut q_paw_sprite {
+            transform.translation = Vec3::new(paws_rect.width() * 0.17, 0., 0.) * paw.direction();
+        }
+        for mut sprite in q_paw_sprite
+            .iter_mut()
+            .map(|t| t.0)
+            .chain(&mut q_claw_sprite)
+        {
+            sprite.custom_size = Some(paw_sprite_size);
+        }
     }
 }
 
