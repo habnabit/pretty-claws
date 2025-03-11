@@ -294,6 +294,7 @@ fn spawn_fox_paws(
 
 fn place_fox_paws(
     mut q_paws: Query<&mut Transform, (With<FoxPaws>, Without<FoxPaw>, Without<FoxClaw>)>,
+    mut q_ui_node: Query<&mut Node, With<UiArea>>,
     q_camera: Query<Ref<Camera>>,
     mut q_paw_sprite: Query<
         (&mut Sprite, &mut Transform, &FoxPaw),
@@ -310,18 +311,34 @@ fn place_fox_paws(
     let Ok(mut paws) = q_paws.get_single_mut() else {
         return;
     };
+    let Ok(mut ui_node) = q_ui_node.get_single_mut() else {
+        return;
+    };
 
+    let viewport_size = viewport.size();
     if camera.is_changed() || paws.is_added() {
-        let paws_box_inset = viewport.width() / 3.;
-        let paws_rect = Rect::new(
-            viewport.min.x + paws_box_inset,
-            viewport.min.y,
-            viewport.max.x,
-            viewport.max.y,
-        );
+        let (paws_rect, ui_rect) = if viewport_size.x > viewport_size.y {
+            let paws_box_inset = viewport_size.x * 0.4;
+            let x_split = viewport.min.x + paws_box_inset;
+            (
+                Rect::new(x_split, viewport.min.y, viewport.max.x, viewport.max.y),
+                Rect::new(viewport.min.x, viewport.min.y, x_split, viewport.max.y),
+            )
+        } else {
+            let paws_box_inset = viewport_size.y * 0.4;
+            let y_split = viewport.max.y - paws_box_inset;
+            (
+                Rect::new(viewport.min.x, y_split, viewport.max.x, viewport.max.y),
+                Rect::new(viewport.min.x, viewport.min.y, viewport.max.x, y_split),
+            )
+        };
+        ui_node.top = Val::Px(ui_rect.min.x);
+        ui_node.left = Val::Px(ui_rect.min.y);
+        ui_node.width = Val::Px(ui_rect.width());
+        ui_node.height = Val::Px(ui_rect.height());
         let paws_loc = paws_rect.center() - viewport.center();
         paws.translation.x = paws_loc.x;
-        paws.translation.y = paws_loc.y;
+        paws.translation.y = -paws_loc.y;
         let paw_width = paws_rect.width() * 0.3;
         let paw_height = paw_width * FOX_PAW_SIZE.y / FOX_PAW_SIZE.x;
         let paw_sprite_size = Vec2::new(paw_width, paw_height);
@@ -433,6 +450,9 @@ fn state_button_clicked(
 }
 
 #[derive(Reflect, Debug, Component, Clone)]
+struct UiArea;
+
+#[derive(Reflect, Debug, Component, Clone)]
 struct StateNodeArea;
 
 fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
@@ -440,16 +460,17 @@ fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
     commands
         .spawn((
             Node {
-                top: Val::Px(0.),
-                left: Val::Px(0.),
-                height: Val::Percent(100.),
-                width: Val::Vw(33.),
+                // top: Val::Px(0.),
+                // left: Val::Px(0.),
+                // height: Val::Percent(100.),
+                // width: Val::Vw(33.),
                 display: Display::Grid,
                 grid_template_rows: vec![GridTrack::min_content(), GridTrack::flex(1.0)],
                 grid_template_columns: vec![GridTrack::auto()],
                 ..default()
             },
             DEFAULT_BACKGROUND_COLOR,
+            UiArea,
         ))
         .with_children(|parent| {
             parent

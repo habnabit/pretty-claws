@@ -90,7 +90,7 @@ pub fn clear_unused_animation_graphs(
             continue;
         };
         if graph.graph.edge_count() > 0 && player.all_finished() {
-            info!("resetting {graph:?}");
+            // info!("resetting {graph:?}");
             *graph = default();
             commands.entity(entity).insert(AnimationPlayer::default());
         }
