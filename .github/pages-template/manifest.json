@@ -1,0 +1,15 @@
+{
+  "start_url": "/pretty-claws/",
+  "scope": "/pretty-claws/",
+  "short_name": "pretty-claws",
+  "name": "pretty-claws",
+  "lang": "en-US",
+  "display": "standalone",
+  "orientation": "landscape-primary",
+  "icons": [
+    {
+      "src": "clawnail.png",
+      "sizes": "334x334"
+    }
+  ]
+}
