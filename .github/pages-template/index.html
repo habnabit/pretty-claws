@@ -48,6 +48,7 @@
           const success = xhr.readyState === 4 && xhr.status === 200;
           const blob = xhr.response
           resolve({ success, blob });
+          li.innerText += ` done (${xhr.status})`;
         });
         xhr.responseType = "blob";
         xhr.open("GET", url, true);
