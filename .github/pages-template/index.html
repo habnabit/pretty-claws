@@ -39,6 +39,9 @@
             const progress = event.loaded / event.total * 100;
             const mib = event.total / 1024 / 1024;
             li.innerText = `${url}: ${progress.toFixed(1)}% of ${mib.toFixed(2)}MiB`;
+          } else {
+            const kib = event.loaded / 1024;
+            li.innerText = `${url}: ${kib.toFixed(1)}KiB down`;
           }
         });
         xhr.addEventListener("loadend", () => {
