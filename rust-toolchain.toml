@@ -3,4 +3,4 @@
 # SPDX-License-Identifier: EUPL-1.2
 
 [toolchain]
-channel = "nightly"
+channel = "nightly-2025-03-12"
