@@ -16,15 +16,65 @@
     canvas {
       height: 100vh !important;
     }
+    ul {
+      list-style: square;
+    }
   </style>
+  <noscript>
+    <h3>
+      oh. yeah, this is all js. kinda.
+    </h3>
+  </noscript>
+  <ul id="downloading">
+    <li>here comes some pretty claws</li>
+  </ul>
   <script type="module">
-    import init from './pretty-claws.js'
+    function xhrFetch(url) {
+      const xhr = new XMLHttpRequest();
+      const li = document.getElementById("downloading").appendChild(document.createElement("li"));
+      li.innerText = `${url}: starting`;
+      return new Promise((resolve) => {
+        xhr.addEventListener("progress", (event) => {
+          if (event.lengthComputable) {
+            const progress = event.loaded / event.total * 100;
+            const mib = event.total / 1024 / 1024;
+            li.innerText = `${url}: ${progress.toFixed(1)}% of ${mib.toFixed(2)}MiB`;
+          }
+        });
+        xhr.addEventListener("loadend", () => {
+          const success = xhr.readyState === 4 && xhr.status === 200;
+          const blob = xhr.response
+          resolve({ success, blob });
+        });
+        xhr.responseType = "blob";
+        xhr.open("GET", url, true);
+        xhr.send();
+      });
+    }
 
-    init().catch((error) => {
-      if (!error.message.startsWith("Using exceptions for control flow, don't mind me. This isn't actually an error!")) {
-        throw error;
+    async function main() {
+      const ul = document.getElementById("downloading");
+      const fetches = [
+        xhrFetch("./pretty-claws.js"),
+        xhrFetch("./pretty-claws_bg.wasm"),
+      ];
+      const responses = await Promise.all(fetches);
+      if (responses.find((r) => !r.success)) {
+        console.log("load failure");
+        ul.appendChild(document.createElement("li")).innerText = "load failure";
+        return;
       }
-    });
+      ul.appendChild(document.createElement("li")).innerText = "starting bevy ...";
+      const objects = responses.map((r) => URL.createObjectURL(r.blob));
+      const module = await import(objects[0]);
+      module.default(objects[1]).catch((error) => {
+        if (!error.message.startsWith("Using exceptions for control flow, don't mind me. This isn't actually an error!")) {
+          throw error;
+        }
+      });
+      ul.style.display = "none";
+    }
+    main().catch(console.error);
   </script>
 </body>
 
