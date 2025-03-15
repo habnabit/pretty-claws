@@ -34,6 +34,21 @@ use rand_chacha::ChaCha8Rng;
 use uuid::Uuid;
 
 fn main() {
+    #[cfg(target_family = "wasm")]
+    let progress_ul: Option<_> = try {
+        use wasm_bindgen::JsCast;
+        web_sys::console::log_1(&"main start".into());
+        let document = web_sys::window()?.document()?;
+        let ul = document
+            .get_element_by_id("downloading")?
+            .dyn_into::<web_sys::HtmlElement>()
+            .ok()?;
+        ul.append_child(&document.create_element("li").ok()?.into())
+            .ok()?
+            .set_text_content(Some("bevy app init ..."));
+        ul
+    };
+
     let mut app = App::new();
 
     app.add_plugins({
@@ -116,6 +131,11 @@ fn main() {
         app.add_systems(OnEnter(state), set_button_background);
     }
 
+    #[cfg(target_family = "wasm")]
+    let _: Option<_> = try {
+        web_sys::console::log_1(&"bevy run".into());
+        progress_ul?.style().set_property("display", "none").ok()?;
+    };
     app.run();
 }
 
