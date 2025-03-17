@@ -16,6 +16,7 @@
     canvas {
       height: 100vh !important;
     }
+
     ul {
       list-style: square;
     }
@@ -29,54 +30,63 @@
     <li>here comes some pretty claws</li>
   </ul>
   <script type="module">
+    import sizes from "./sizes.json" with {type: "json"};
+
     async function progressFetch(url) {
       const li = document.getElementById("downloading").appendChild(document.createElement("li"));
       li.innerText = `${url}: starting`;
-      const resp = await fetch(url);
-      const reader = resp.body.getReader();
-      const byteLength = resp.headers.has('content-encoding')? null : Number(resp.headers.get('content-length'));
+      const response = await fetch(url);
+      const reader = response.body.getReader();
+      const byteLength = sizes[url] || (response.headers.has('content-encoding') ? null : Number(response.headers.get('content-length')));
       var bytesRead = 0;
+      const chunks = [];
       while (true) {
-        const {done, value} = await reader.read();
+        const { done, value } = await reader.read();
         if (done) {
           li.innerText += ` done!`;
           break;
         }
         bytesRead += value.length;
+        chunks.push(value);
         if (byteLength) {
           const progress = bytesRead / byteLength * 100;
           const mib = bytesRead / 1024 / 1024;
-          li.innerText = `${url}: ${progress.toFixed(1)}% of ${mib.toFixed(2)}MiB`;
+          li.innerText = `${url}: ${progress.toFixed(1)}%; ${mib.toFixed(2)}MiB ...`;
         } else {
           const kib = bytesRead / 1024;
-          li.innerText = `${url}: ${kib.toFixed(1)}KiB down...`;
+          li.innerText = `${url}: ${kib.toFixed(1)}KiB down ...`;
         }
       }
-      return resp
+      const blob = new Blob(chunks, { type: response.headers.get('content-type') });
+      return { response, blob };
     }
 
-    console.log('starting js main');
     async function main() {
       const ul = document.getElementById("downloading");
       const fetches = [
-        progressFetch("./pretty-claws.js"),
-        progressFetch("./pretty-claws_bg.wasm"),
-      ];
+        "pretty-claws.js",
+        "pretty-claws_bg.wasm",
+      ].map(progressFetch);
       const responses = await Promise.all(fetches);
-      if (responses.find((r) => !r.ok)) {
-        console.log("load failure", responses);
+      if (responses.find(({ response }) => !response.ok)) {
+        console.log("load failure");
         ul.appendChild(document.createElement("li")).innerText = "load failure";
         return;
       }
       ul.appendChild(document.createElement("li")).innerText = "loading wasm ...";
-      const module = await import('./pretty-claws.js');
-      module.default().catch((error) => {
+      const [rLoader, rWasm] = responses;
+      const loaderObjectURL = URL.createObjectURL(rLoader.blob);
+      const loaderWasmResponse = new Response(rWasm.blob, rWasm.response);
+      const module = await import(loaderObjectURL);
+      module.default({ module_or_path: loaderWasmResponse }).catch((error) => {
         if (!error.message.startsWith("Using exceptions for control flow, don't mind me. This isn't actually an error!")) {
           throw error;
         }
       });
       ul.appendChild(document.createElement("li")).innerText = "starting bevy ...";
     }
+
+    console.log('starting js main');
     main().catch(console.error);
   </script>
 </body>
