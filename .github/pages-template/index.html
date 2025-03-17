@@ -30,14 +30,15 @@
     <li>here comes some pretty claws</li>
   </ul>
   <script type="module">
-    import sizes from "./sizes.json" with {type: "json"};
+    var sizes;
 
     async function progressFetch(url) {
       const li = document.getElementById("downloading").appendChild(document.createElement("li"));
       li.innerText = `${url}: starting`;
       const response = await fetch(url);
       const reader = response.body.getReader();
-      const byteLength = sizes[url] || (response.headers.has('content-encoding') ? null : Number(response.headers.get('content-length')));
+      const byteLength = (sizes && sizes[url])
+        || (response.headers.has('content-encoding') ? null : Number(response.headers.get('content-length')));
       var bytesRead = 0;
       const chunks = [];
       while (true) {
@@ -62,6 +63,11 @@
     }
 
     async function main() {
+      if (!sizes) {
+        const sizesResp = await fetch('sizes.json');
+        sizes = await sizesResp.json();
+      }
+
       const ul = document.getElementById("downloading");
       const fetches = [
         "pretty-claws.js",
