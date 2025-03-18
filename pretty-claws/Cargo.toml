@@ -32,11 +32,13 @@ bevy = { version = "0.15.3", default-features = false, features = [
 ] }
 bevy-inspector-egui = { version = "0.29.1", optional = true }
 bevy_egui = { version = "~0.32.0", default-features = false, optional = true }
+bevy_pkv = { version = "~0.12", default-features = false, features = ["bevy", "sled"] }
 blake3 = { version = "~1.6.1", features = ["pure"] }
 getrandom = { version = "0.3.1", features = ["wasm_js"] }
 petgraph = { version = "0.6", default-features = false }
 rand = "0.9.0"
 rand_chacha = "0.9.0"
+serde = "1.0.219"
 uuid = { version = "~1.12.1", features = ["v4"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]

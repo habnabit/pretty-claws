@@ -26,6 +26,7 @@ use bevy::{
         render_resource::{AsBindGroup, ShaderRef},
     },
     ui::widget::NodeImageMode,
+    utils::HashMap,
     window::PrimaryWindow,
 };
 use petgraph::graph::NodeIndex;
@@ -64,6 +65,7 @@ fn main() {
 
     app.add_plugins(UiMaterialPlugin::<ColorGradientMaterial>::default())
         .init_resource::<SeededRng>()
+        .insert_resource(bevy_pkv::PkvStore::new("pictures.cutefox", "pretty-claws"))
         .init_state::<ColorState>()
         .register_asset_reflect::<ColorGradientMaterial>()
         .register_type::<AdjustColorWeight>()
@@ -83,6 +85,10 @@ fn main() {
         .register_type::<FoxPaws>()
         .register_type::<FoxPawsSpinNode>()
         .register_type::<HslaAttribute>()
+        .register_type::<LastPersistentState>()
+        .register_type::<PersistentClaw>()
+        .register_type::<PersistentColor>()
+        .register_type::<PersistentState>()
         .register_type::<PickButton>()
         .register_type::<PickButtonAction>()
         .register_type::<RemoveColorButton>()
@@ -117,6 +123,7 @@ fn main() {
                     show_color_caption,
                 )
                     .chain(),
+                save_state,
             ),
         )
         .add_systems(OnEnter(ColorState::Rainbow), apply_cubehelix)
@@ -204,7 +211,18 @@ struct FoxPaws {
     rotated: bool,
 }
 
-#[derive(Debug, Clone, Copy, Component, Reflect)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Component,
+    Reflect,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 enum FoxPaw {
     Left,
     Right,
@@ -226,7 +244,9 @@ impl FoxPaw {
     }
 }
 
-#[derive(Debug, Component, Reflect)]
+#[derive(
+    Debug, Clone, Component, Reflect, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
 struct FoxClaw {
     paw: FoxPaw,
     digit: u8,
@@ -255,9 +275,19 @@ impl SavedAnimationNode for FoxPawsSpinNode {
 
 fn spawn_fox_paws(
     assets: Res<AppAssets>,
+    last_state: Res<LastPersistentState>,
     mut animation_graphs: ResMut<Assets<AnimationGraph>>,
     mut commands: Commands,
 ) {
+    let prev_claws = last_state.0.as_ref().and_then(|s| match s {
+        PersistentState::Pick { claws, .. } => Some(
+            claws
+                .iter()
+                .map(|c| (c.claw.clone(), c.color))
+                .collect::<HashMap<_, _>>(),
+        ),
+        _ => None,
+    });
     let player = commands
         .spawn((
             AnimationPlayer::default(),
@@ -279,18 +309,25 @@ fn spawn_fox_paws(
             ))
             .with_children(|parent| {
                 for (e, image) in (&assets.fox_paw_images[1..]).into_iter().enumerate() {
+                    let claw = FoxClaw {
+                        paw,
+                        digit: (e as u8) + 1,
+                    };
+                    let color = prev_claws
+                        .as_ref()
+                        .and_then(|m| m.get(&claw))
+                        .copied()
+                        .unwrap_or_default();
                     parent.spawn((
                         Sprite {
                             image: image.clone_weak(),
                             flip_x,
                             custom_size: Some(FOX_PAW_SIZE),
+                            color,
                             ..default()
                         },
                         Transform::from_xyz(0., 0., -1.),
-                        FoxClaw {
-                            paw,
-                            digit: (e as u8) + 1,
-                        },
+                        claw,
                     ));
                 }
             });
@@ -416,7 +453,97 @@ fn click_spin_fox_paws(
     }
 }
 
-#[derive(States, Reflect, Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Resource, Reflect)]
+#[reflect(Resource)]
+struct LastPersistentState(Option<PersistentState>);
+
+#[derive(Debug, Clone, Reflect, serde::Serialize, serde::Deserialize)]
+enum PersistentState {
+    Rainbow,
+    Pick {
+        colors: Vec<PersistentColor>,
+        claws: Vec<PersistentClaw>,
+    },
+}
+
+#[derive(Debug, Clone, Reflect, serde::Serialize, serde::Deserialize)]
+struct PersistentColor {
+    color: Color,
+    weight: usize,
+    n_claws: usize,
+}
+
+#[derive(Debug, Clone, Reflect, serde::Serialize, serde::Deserialize)]
+struct PersistentClaw {
+    claw: FoxClaw,
+    color: Color,
+}
+
+impl PersistentState {
+    const KEY: &'static str = "persistent-state";
+}
+
+fn save_state(
+    app_state: Res<State<ColorState>>,
+    q_colors: Query<Ref<SelectedColor>>,
+    q_claws: Query<(Ref<FoxClaw>, Ref<Sprite>)>,
+    mut pkv: ResMut<bevy_pkv::PkvStore>,
+) {
+    let mut any_changes = app_state.is_changed();
+    let persistent = match **app_state {
+        ColorState::Init => return,
+        ColorState::Rainbow => PersistentState::Rainbow,
+        ColorState::Pick => {
+            let colors = q_colors
+                .iter()
+                .map(|c| {
+                    if c.is_changed() {
+                        any_changes = true;
+                    }
+                    PersistentColor {
+                        color: c.selected,
+                        weight: c.weight,
+                        n_claws: c.n_claws,
+                    }
+                })
+                .collect();
+            let claws = q_claws
+                .iter()
+                .map(|(claw, sprite)| {
+                    if claw.is_changed() || sprite.is_changed() {
+                        any_changes = true;
+                    }
+                    PersistentClaw {
+                        claw: claw.clone(),
+                        color: sprite.color,
+                    }
+                })
+                .collect();
+            PersistentState::Pick { colors, claws }
+        }
+    };
+    if !any_changes {
+        return;
+    }
+    match pkv.set(PersistentState::KEY, &persistent) {
+        Ok(()) => trace!("saved {persistent:#?}"),
+        Err(e) => error!("couldn't persist state: {e:?}"),
+    }
+}
+
+#[derive(
+    States,
+    Reflect,
+    Default,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 enum ColorState {
     #[default]
     Init,
@@ -475,8 +602,7 @@ struct UiArea;
 #[derive(Reflect, Debug, Component, Clone)]
 struct StateNodeArea;
 
-fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
-    commands.set_state(ColorState::Rainbow);
+fn spawn_ui(last_state: Res<LastPersistentState>, assets: Res<AppAssets>, mut commands: Commands) {
     commands
         .spawn((
             Node {
@@ -532,6 +658,13 @@ fn spawn_ui(assets: Res<AppAssets>, mut commands: Commands) {
                 StateNodeArea,
             ));
         });
+
+    let initial_state = match &last_state.0 {
+        None | Some(PersistentState::Rainbow) => ColorState::Rainbow,
+        Some(PersistentState::Pick { .. }) => ColorState::Pick,
+    };
+
+    commands.set_state(initial_state);
 }
 
 #[derive(Reflect, Debug, Clone, Copy)]
@@ -564,6 +697,8 @@ struct AdjustColorWeight(Entity, isize);
 struct ColorsNodeArea;
 
 fn show_pick_buttons(
+    mut did_first_init: Local<bool>,
+    last_state: Res<LastPersistentState>,
     q_area: Query<Entity, With<StateNodeArea>>,
     assets: Res<AppAssets>,
     mut commands: Commands,
@@ -571,6 +706,7 @@ fn show_pick_buttons(
     let Ok(area) = q_area.get_single() else {
         return;
     };
+    let mut colors_area = Entity::PLACEHOLDER;
     commands.entity(area).with_children(|parent| {
         parent
             .spawn(Node {
@@ -604,15 +740,31 @@ fn show_pick_buttons(
                         });
                 }
             });
-        parent.spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                margin: UiRect::horizontal(Val::Px(13.)),
-                ..default()
-            },
-            ColorsNodeArea,
-        ));
+        colors_area = parent
+            .spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    margin: UiRect::horizontal(Val::Px(13.)),
+                    ..default()
+                },
+                ColorsNodeArea,
+            ))
+            .id();
     });
+
+    if !*did_first_init {
+        if let Some(PersistentState::Pick { colors, .. }) = &last_state.0 {
+            for &PersistentColor {
+                color,
+                weight,
+                n_claws,
+            } in colors
+            {
+                add_color(&mut commands, &assets, colors_area, color, weight, n_claws);
+            }
+        }
+        *did_first_init = true;
+    }
 }
 
 fn remove_pick_buttons(q_area: Query<Entity, With<StateNodeArea>>, mut commands: Commands) {
@@ -680,59 +832,8 @@ fn pick_button_clicked(
         }
         match button.0 {
             PickButtonAction::AddColor => {
-                commands.entity(area).with_children(|parent| {
-                    parent
-                        .spawn(Node {
-                            display: Display::Grid,
-                            grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::auto()],
-                            ..default()
-                        })
-                        .with_children(|parent| {
-                            let color_node = parent.parent_entity();
-                            let color = pick_random_color(&mut rng.0);
-                            parent
-                                .spawn((
-                                    Button,
-                                    Node {
-                                        width: Val::Percent(100.),
-                                        margin: UiRect::all(Val::Px(2.)),
-                                        padding: UiRect::all(Val::Px(2.)).with_left(Val::Px(5.)),
-                                        ..default()
-                                    },
-                                    SelectedColor {
-                                        selected: color,
-                                        ..default()
-                                    },
-                                    BackgroundColor(color),
-                                ))
-                                .with_child((
-                                    Text::new(""),
-                                    assets.text_font().with_font_size(16.),
-                                    DEFAULT_TEXT_COLOR,
-                                ));
-                            parent
-                                .spawn((
-                                    Button,
-                                    RemoveColorButton(color_node),
-                                    assets.make_borders(1, BUTTON_BORDER_COLOR),
-                                    Node {
-                                        width: Val::Px(23.),
-                                        margin: UiRect::all(Val::Px(2.)).with_left(Val::Px(5.)),
-                                        justify_content: JustifyContent::Center,
-                                        align_items: AlignItems::Center,
-                                        ..default()
-                                    },
-                                    DEFAULT_BACKGROUND_COLOR,
-                                ))
-                                .with_children(|parent| {
-                                    parent.spawn((
-                                        Text::new("x"),
-                                        assets.text_font().with_font_size(14.),
-                                        DEFAULT_TEXT_COLOR,
-                                    ));
-                                });
-                        });
-                });
+                let color = pick_random_color(&mut rng.0);
+                add_color(&mut commands, &assets, area, color, 1, 0);
             }
             PickButtonAction::Randomize => {
                 let mut colors = q_colors
@@ -755,6 +856,70 @@ fn pick_button_clicked(
             }
         }
     }
+}
+
+fn add_color(
+    commands: &mut Commands,
+    assets: &AppAssets,
+    area: Entity,
+    color: Color,
+    weight: usize,
+    n_claws: usize,
+) {
+    commands.entity(area).with_children(|parent| {
+        parent
+            .spawn(Node {
+                display: Display::Grid,
+                grid_template_columns: vec![GridTrack::flex(1.0), GridTrack::auto()],
+                ..default()
+            })
+            .with_children(|parent| {
+                let color_node = parent.parent_entity();
+                parent
+                    .spawn((
+                        Button,
+                        Node {
+                            width: Val::Percent(100.),
+                            margin: UiRect::all(Val::Px(2.)),
+                            padding: UiRect::all(Val::Px(2.)).with_left(Val::Px(5.)),
+                            ..default()
+                        },
+                        SelectedColor {
+                            selected: color,
+                            weight,
+                            n_claws,
+                            ..default()
+                        },
+                        BackgroundColor(color),
+                    ))
+                    .with_child((
+                        Text::new(""),
+                        assets.text_font().with_font_size(16.),
+                        DEFAULT_TEXT_COLOR,
+                    ));
+                parent
+                    .spawn((
+                        Button,
+                        RemoveColorButton(color_node),
+                        assets.make_borders(1, BUTTON_BORDER_COLOR),
+                        Node {
+                            width: Val::Px(23.),
+                            margin: UiRect::all(Val::Px(2.)).with_left(Val::Px(5.)),
+                            justify_content: JustifyContent::Center,
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        DEFAULT_BACKGROUND_COLOR,
+                    ))
+                    .with_children(|parent| {
+                        parent.spawn((
+                            Text::new("x"),
+                            assets.text_font().with_font_size(14.),
+                            DEFAULT_TEXT_COLOR,
+                        ));
+                    });
+            });
+    });
 }
 
 fn total_color_weights(mut q_colors: Query<&mut SelectedColor>) {
@@ -1413,6 +1578,7 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut texture_atlases: ResMut<Assets<TextureAtlasLayout>>,
     mut animation_graphs: ResMut<Assets<AnimationGraph>>,
+    pkv: Res<bevy_pkv::PkvStore>,
 ) {
     commands.spawn(Camera2d);
     let player = commands
@@ -1446,6 +1612,15 @@ fn setup(
                 TextFont::from_font_size(50.),
             ));
         });
+
+    let last_state = match pkv.get(PersistentState::KEY) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            warn!("couldn't load persistent state: {e:?}");
+            None
+        }
+    };
+    commands.insert_resource(LastPersistentState(last_state));
 
     commands.insert_resource({
         let fox_paw_images = FOX_PAW_IMAGES
