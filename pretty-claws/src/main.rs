@@ -103,28 +103,31 @@ fn main() {
         .add_systems(
             Update,
             (
-                animation::clear_unused_animation_graphs,
-                set_button_border,
-                state_button_clicked,
-                pick_button_clicked,
-                color_clicked,
-                remove_color_button_clicked,
-                update_gradient,
-                place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
-                asset_loader_update.run_if(resource_exists::<AssetBarrier>),
-                (spawn_ui, spawn_fox_paws, set_button_background)
-                    .chain()
-                    .run_if(assets_loaded.and(run_once)),
-                spin_fox_paws.run_if(input_just_pressed(KeyCode::KeyS)),
-                update_cubehelix_color,
                 (
-                    adjust_color_weight_clicked,
-                    total_color_weights,
-                    show_color_caption,
-                )
-                    .chain(),
+                    animation::clear_unused_animation_graphs,
+                    set_button_border,
+                    state_button_clicked,
+                    pick_button_clicked,
+                    color_clicked,
+                    remove_color_button_clicked,
+                    update_gradient,
+                    place_fox_paws.run_if(any_with_component::<PrimaryWindow>),
+                    asset_loader_update.run_if(resource_exists::<AssetBarrier>),
+                    (spawn_ui, spawn_fox_paws, set_button_background)
+                        .chain()
+                        .run_if(assets_loaded.and(run_once)),
+                    spin_fox_paws.run_if(input_just_pressed(KeyCode::KeyS)),
+                    update_cubehelix_color,
+                    (
+                        adjust_color_weight_clicked,
+                        total_color_weights,
+                        show_color_caption,
+                    )
+                        .chain(),
+                ),
                 save_state,
-            ),
+            )
+                .chain(),
         )
         .add_systems(OnEnter(ColorState::Rainbow), apply_cubehelix)
         .add_systems(OnExit(ColorState::Rainbow), remove_cubehelix)
@@ -175,6 +178,7 @@ impl AppAssets {
 const DEFAULT_BACKGROUND_COLOR: BackgroundColor = BackgroundColor(Color::hsla(0., 0., 0.5, 0.8));
 const PICKER_BACKGROUND_COLOR: BackgroundColor = BackgroundColor(Color::hsla(0., 0., 0.9, 0.2));
 const DEFAULT_TEXT_COLOR: TextColor = TextColor(Color::hsl(0., 0., 0.1));
+const LIGHT_TEXT_COLOR: TextColor = TextColor(Color::hsl(0., 0., 0.9));
 const BUTTON_BORDER_COLOR: Color = Color::hsl(330., 1., 0.2);
 const STATE_BUTTON_SELECTED_BACKGROUND: Color = Color::hsla(330., 0.8, 0.9, 0.8);
 const STATE_BUTTON_BACKGROUND: Color = Color::hsla(0., 0., 0.7, 0.8);
@@ -934,13 +938,18 @@ fn total_color_weights(mut q_colors: Query<&mut SelectedColor>) {
 
 fn show_color_caption(
     q_colors: Query<(&SelectedColor, &Children), Changed<SelectedColor>>,
-    mut q_text: Query<&mut Text>,
+    mut q_text: Query<(&mut Text, &mut TextColor)>,
 ) {
     for (selection, children) in &q_colors {
-        let Ok(mut text) = q_text.get_mut(children[0]) else {
+        let Ok((mut text, mut text_color)) = q_text.get_mut(children[0]) else {
             continue;
         };
         **text = selection.caption();
+        *text_color = if selection.selected.luminance() >= 0.5 {
+            DEFAULT_TEXT_COLOR
+        } else {
+            LIGHT_TEXT_COLOR
+        };
     }
 }
 
