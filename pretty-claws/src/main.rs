@@ -164,7 +164,7 @@ impl AppAssets {
     fn make_borders(&self, index: usize, color: Color) -> ImageNode {
         ImageNode::from_atlas_image(self.borders.clone_weak(), TextureAtlas {
             index,
-            layout: self.border_atlas_layout.clone(),
+            layout: self.border_atlas_layout.clone_weak(),
         })
         .with_color(color)
         .with_mode(NodeImageMode::Sliced(self.border_slicer.clone()))
