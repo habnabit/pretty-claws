@@ -30,7 +30,8 @@ use bevy::{
     },
     ui::widget::NodeImageMode,
     utils::HashMap,
-    window::PrimaryWindow,
+    window::{PrimaryWindow, SystemCursorIcon},
+    winit::cursor::CursorIcon,
 };
 use petgraph::graph::NodeIndex;
 use rand::{distr::Distribution, seq::IndexedMutRandom, Rng, SeedableRng};
@@ -106,6 +107,7 @@ fn main() {
         .add_observer(click_spin_fox_paws)
         .add_observer(gradient_drag::<Pointer<Click>>)
         .add_observer(gradient_drag::<Pointer<Move>>)
+        .add_observer(visit_credits_link)
         .add_observer(update_scroll_position_drag)
         .add_systems(Startup, setup)
         .add_systems(
@@ -133,6 +135,7 @@ fn main() {
                     )
                         .chain(),
                     update_scroll_position,
+                    show_credits_link_pointer,
                 ),
                 save_state,
             )
@@ -1509,28 +1512,7 @@ fn apply_cubehelix(
             })
             .with_children(|parent| {
                 for node in &credits.nodes {
-                    parent
-                        .spawn((node.node.clone(), PickingBehavior {
-                            should_block_lower: false,
-                            is_hoverable: true,
-                        }))
-                        .with_children(|parent| {
-                            parent
-                                .spawn((Text::default(), TextLayout::default(), PickingBehavior {
-                                    should_block_lower: false,
-                                    is_hoverable: true,
-                                }))
-                                .with_children(|parent| {
-                                    for (link, bundle) in &node.spans {
-                                        let mut bundle = bundle.clone();
-                                        bundle.font.font = assets.font.clone_weak();
-                                        let mut builder = parent.spawn(bundle);
-                                        if let Some(link) = link {
-                                            builder.insert(link.clone());
-                                        }
-                                    }
-                                });
-                        });
+                    node.spawn_into(parent, &assets);
                 }
             });
     });
@@ -1699,9 +1681,89 @@ fn asset_loader_update(
 struct CreditsLink(String);
 
 #[derive(Debug, Clone, Reflect)]
-struct CreditsNode {
+struct CreditsSimpleNode {
     node: Node,
-    spans: Vec<(Option<CreditsLink>, CreditsSpanBundle)>,
+    link: Option<CreditsLink>,
+    spans: Vec<CreditsSpanBundle>,
+}
+
+impl CreditsSimpleNode {
+    fn spawn_into(&self, parent: &mut ChildBuilder, assets: &AppAssets) {
+        parent
+            .spawn((self.node.clone(), PickingBehavior {
+                should_block_lower: false,
+                is_hoverable: true,
+            }))
+            .with_children(|parent| {
+                let mut builder =
+                    parent.spawn((Text::default(), TextLayout::default(), PickingBehavior {
+                        should_block_lower: false,
+                        is_hoverable: true,
+                    }));
+                builder.with_children(|parent| {
+                    for bundle in &self.spans {
+                        let mut bundle = bundle.clone();
+                        bundle.font.font = assets.font.clone_weak();
+                        parent.spawn(bundle);
+                    }
+                });
+                if let Some(link) = &self.link {
+                    builder.insert((Button, link.clone()));
+                }
+            });
+    }
+}
+
+#[derive(Debug, Clone, Reflect)]
+enum CreditsNode {
+    Simple(CreditsSimpleNode),
+    List(Vec<CreditsSimpleNode>),
+}
+
+impl CreditsNode {
+    fn spawn_into(&self, parent: &mut ChildBuilder, assets: &AppAssets) {
+        match self {
+            CreditsNode::Simple(n) => n.spawn_into(parent, assets),
+            CreditsNode::List(v) => {
+                parent
+                    .spawn((
+                        Node {
+                            display: Display::Grid,
+                            grid_template_columns: vec![
+                                GridTrack::min_content(),
+                                GridTrack::flex(1.0),
+                            ],
+                            ..default()
+                        },
+                        PickingBehavior {
+                            should_block_lower: false,
+                            is_hoverable: true,
+                        },
+                    ))
+                    .with_children(|parent| {
+                        for n in v {
+                            parent
+                                .spawn((
+                                    Node {
+                                        margin: UiRect::left(Val::Px(3.)).with_right(Val::Px(5.)),
+                                        ..default()
+                                    },
+                                    PickingBehavior {
+                                        should_block_lower: false,
+                                        is_hoverable: true,
+                                    },
+                                ))
+                                .with_child((
+                                    Text::new("►"),
+                                    assets.text_font().with_font_size(CREDITS_FONT_SIZE + 3.),
+                                    DEFAULT_TEXT_COLOR,
+                                ));
+                            n.spawn_into(parent, assets);
+                        }
+                    });
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Bundle, Reflect)]
@@ -1725,7 +1787,8 @@ impl Credits {
         #[derive(Debug, Default)]
         struct MarkdownBuilder {
             nodes: Vec<CreditsNode>,
-            spans: Vec<(Option<CreditsLink>, CreditsSpanBundle)>,
+            list_items: Vec<CreditsSimpleNode>,
+            spans: Vec<CreditsSpanBundle>,
             stack: Vec<(TagEnd, Option<CreditsLink>)>,
         }
 
@@ -1749,7 +1812,7 @@ impl Credits {
                 // info!("push: {tag:?}");
                 let link = match &tag {
                     Tag::Link { dest_url, .. } => {
-                        info!("linking to {dest_url:?}");
+                        // info!("linking to {dest_url:?}");
                         Some(CreditsLink(dest_url.to_string()))
                     }
                     _ => None,
@@ -1759,55 +1822,94 @@ impl Credits {
 
             fn end_tag(&mut self, tag: TagEnd) {
                 // info!("pop: {tag:?}");
-                assert_eq!(self.stack.pop().map(|t| t.0), Some(tag));
+                let (prev_tag, link) = self.stack.pop().unwrap();
+                assert_eq!(prev_tag, tag);
                 match tag {
                     TagEnd::Item => {
-                        self.take_spans(Node {
-                            margin: UiRect::left(Val::Px(15.)).with_top(Val::Px(2.)),
-                            ..default()
-                        });
+                        let list_item = self.take_spans_as_node(
+                            Node {
+                                margin: UiRect::top(Val::Px(2.)),
+                                ..default()
+                            },
+                            link,
+                        );
+                        self.list_items.push(list_item);
+                    }
+                    TagEnd::List(_) => {
+                        let list_items = std::mem::replace(&mut self.list_items, Vec::new());
+                        self.nodes.push(CreditsNode::List(list_items));
                     }
                     TagEnd::BlockQuote(_) => {
-                        self.take_spans(Node {
-                            margin: UiRect::vertical(Val::Px(7.)).with_left(Val::Px(25.)),
-                            ..default()
-                        });
+                        self.take_spans(
+                            Node {
+                                margin: UiRect::vertical(Val::Px(7.)).with_left(Val::Px(25.)),
+                                ..default()
+                            },
+                            link,
+                        );
                     }
                     TagEnd::Paragraph if self.stack.is_empty() => {
-                        self.take_spans(Node {
-                            margin: UiRect::vertical(Val::Px(3.)),
-                            ..default()
-                        });
+                        self.take_spans(
+                            Node {
+                                margin: UiRect::vertical(Val::Px(3.)),
+                                ..default()
+                            },
+                            link,
+                        );
                     }
                     TagEnd::Heading(_) => {
-                        self.take_spans(Node {
-                            margin: UiRect::top(Val::Px(10.)).with_bottom(Val::Px(2.)),
-                            ..default()
-                        });
+                        self.take_spans(
+                            Node {
+                                margin: UiRect::top(Val::Px(10.)).with_bottom(Val::Px(2.)),
+                                ..default()
+                            },
+                            link,
+                        );
                     }
                     TagEnd::DefinitionListTitle => {
-                        self.take_spans(Node {
-                            margin: UiRect::top(Val::Px(5.)),
-                            ..default()
-                        });
+                        self.take_spans(
+                            Node {
+                                margin: UiRect::top(Val::Px(5.)),
+                                ..default()
+                            },
+                            link,
+                        );
                     }
                     TagEnd::DefinitionListDefinition => {
-                        self.take_spans(Node {
-                            margin: UiRect::left(Val::Px(10.)),
-                            ..default()
-                        });
+                        self.take_spans(
+                            Node {
+                                margin: UiRect::left(Val::Px(10.)),
+                                ..default()
+                            },
+                            link,
+                        );
+                    }
+                    TagEnd::Link => {
+                        // linkify the parent block for now
+                        if let Some((_, stack_link)) = self.stack.last_mut() {
+                            *stack_link = stack_link.take().or(link);
+                        }
                     }
                     _ if self.stack.is_empty() => {
-                        self.take_spans(Node::default());
+                        self.take_spans(Node::default(), link);
                     }
                     _ => {}
                 }
             }
 
-            fn take_spans(&mut self, node: Node) {
+            fn take_spans_as_node(
+                &mut self,
+                node: Node,
+                link: Option<CreditsLink>,
+            ) -> CreditsSimpleNode {
                 let spans = std::mem::replace(&mut self.spans, Vec::new());
-                if !spans.is_empty() {
-                    self.nodes.push(CreditsNode { node, spans });
+                CreditsSimpleNode { node, link, spans }
+            }
+
+            fn take_spans(&mut self, node: Node, link: Option<CreditsLink>) {
+                let node = self.take_spans_as_node(node, link);
+                if !node.spans.is_empty() {
+                    self.nodes.push(CreditsNode::Simple(node));
                 }
             }
 
@@ -1815,8 +1917,7 @@ impl Credits {
                 // info!("stack at: {:#?}, text: {text:?}", self.stack);
                 let mut color = DEFAULT_TEXT_COLOR;
                 let mut font_size = CREDITS_FONT_SIZE;
-                let mut span_link = None;
-                for (tag, link) in &self.stack {
+                for (tag, _) in &self.stack {
                     match tag {
                         &TagEnd::Heading(level) => {
                             let scale = 1. + (7. - (level as u8 as f32)) / 6.;
@@ -1827,15 +1928,12 @@ impl Credits {
                         &TagEnd::Link => color = LINK_TEXT_COLOR,
                         _ => {}
                     }
-                    if link.is_some() {
-                        span_link = link.as_ref();
-                    }
                 }
-                self.spans.push((span_link.cloned(), CreditsSpanBundle {
+                self.spans.push(CreditsSpanBundle {
                     text: TextSpan::new(text),
                     color,
                     font: TextFont::from_font_size(font_size),
-                }));
+                });
             }
 
             fn into_credits(self) -> Credits {
@@ -1858,6 +1956,33 @@ impl Credits {
             builder.process_event(ev);
         }
         builder.into_credits()
+    }
+}
+
+fn show_credits_link_pointer(
+    q_links: Query<&Interaction, (Changed<Interaction>, With<Button>, With<CreditsLink>)>,
+    q_window: Query<Entity, With<PrimaryWindow>>,
+    mut commands: Commands,
+) {
+    let Ok(window) = q_window.get_single() else {
+        return;
+    };
+    for &interaction in &q_links {
+        // info!("interaction={interaction:?} for link={link:?}");
+        let cursor = match interaction {
+            Interaction::Pressed | Interaction::Hovered => SystemCursorIcon::Pointer,
+            Interaction::None => SystemCursorIcon::Default,
+        };
+        commands.entity(window).insert(CursorIcon::System(cursor));
+    }
+}
+
+fn visit_credits_link(ev: Trigger<Pointer<Click>>, q_link: Query<&CreditsLink>) {
+    let Ok(link) = q_link.get(ev.entity()) else {
+        return;
+    };
+    if let Err(e) = webbrowser::open(&link.0) {
+        error!("couldn't open url({:?}): {e:?}", link.0);
     }
 }
 

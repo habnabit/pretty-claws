@@ -6,7 +6,7 @@ UI borders © 2023 <https://kenney-assets.itch.io/fantasy-ui-borders>
 
 Fira Sans digitized data © 2012–2018, The Mozilla Foundation and Telefonica S.A., bBox Type GmbH and Carrois Corporate GbR, with Reserved Font Name "Fira" <https://github.com/bBoxType/FiraSans>
 
-© 2025 <mailto:_@habnab.it>
+© 2025 hab \<_@habnab.it> <https://github.com/habnabit/pretty-claws>
 
 ## EUROPEAN UNION PUBLIC LICENCE v. 1.2
 
@@ -336,3 +336,5 @@ appropriation.
 
 All other changes or additions to this Appendix require the
 production of a new EUPL version.
+
+EOT.
