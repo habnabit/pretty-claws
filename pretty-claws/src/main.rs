@@ -287,7 +287,7 @@ fn spawn_fox_paws(
         PersistentState::Pick { claws, .. } => Some(
             claws
                 .iter()
-                .map(|c| (c.claw.clone(), c.color))
+                .map(|c| (&c.claw, &c.color))
                 .collect::<HashMap<_, _>>(),
         ),
         _ => None,
@@ -319,8 +319,7 @@ fn spawn_fox_paws(
                     };
                     let color = prev_claws
                         .as_ref()
-                        .and_then(|m| m.get(&claw))
-                        .copied()
+                        .and_then(|m| m.get(&claw).map(|&&c| c))
                         .unwrap_or_default();
                     parent.spawn((
                         Sprite {
