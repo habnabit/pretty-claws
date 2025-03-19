@@ -2,6 +2,10 @@
 
 fox paw image © 2025 <https://ko-fi.com/unholylykoi>
 
+UI borders © 2023 <https://kenney-assets.itch.io/fantasy-ui-borders>
+
+Fira Sans digitized data © 2012–2018, The Mozilla Foundation and Telefonica S.A., bBox Type GmbH and Carrois Corporate GbR, with Reserved Font Name "Fira" <https://github.com/bBoxType/FiraSans>
+
 © 2025 <mailto:_@habnab.it>
 
 ## EUROPEAN UNION PUBLIC LICENCE v. 1.2
@@ -23,7 +27,7 @@ immediately following the copyright notice for the Original Work:
 or has expressed by any other means his willingness to license under
 the EUPL.
 
-### 1.Definitions
+### 1. Definitions
 
 In this Licence, the following terms have the following meaning:
 
@@ -141,7 +145,7 @@ Copyleft clause
     copies of the Original Works or Derivative Works, this Distribution
     or Communication will be done under the terms of this Licence or of a
     later version of this Licence unless the Original Work is expressly
-    distributed only under this version of the Licence  for example by
+    distributed only under this version of the Licence for example by
     communicating EUPL v. 1.2 only. The Licensee (becoming Licensor)
     cannot offer or impose any additional terms or conditions on the
     Work or Derivative Work that alter or restrict the terms of the
@@ -186,7 +190,7 @@ Each time You accept the Licence, the original Licensor and
 subsequent Contributors grant You a licence to their contributions
 to the Work, under the terms of this Licence.
 
-### 7.Disclaimer of Warranty
+### 7. Disclaimer of Warranty
 
 The Work is a work in progress, which is continuously improved by
 numerous Contributors. It is not a finished work and may therefore
@@ -197,7 +201,7 @@ as is basis and without warranties of any kind concerning the Work,
 including without limitation merchantability, fitness for a
 particular purpose, absence of defects or errors, accuracy,
 non-infringement of intellectual property rights other than
-copyright as stated in Article 6 of this  Licence.
+copyright as stated in Article 6 of this Licence.
 
 This disclaimer of warranty is an essential part of the Licence and
 a condition for the grant of any rights to the Work.
@@ -321,7 +325,7 @@ Compatible Licences according to Article 5 EUPL are:
 - Creative Commons Attribution-ShareAlike v. 3.0 Unported
   (CC BY-SA 3.0) for works other than software
 - European Union Public Licence (EUPL) v. 1.1, v. 1.2
-- Qubec Free and Open-Source Licence  Reciprocity (LiLiQ-R)
+- Qubec Free and Open-Source Licence Reciprocity (LiLiQ-R)
   or Strong Reciprocity (LiLiQ-R+).
 
 The European Commission may update this Appendix to later versions
