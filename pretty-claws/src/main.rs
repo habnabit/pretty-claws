@@ -1708,62 +1708,132 @@ struct Credits {
 
 impl Credits {
     fn parse_credits() -> Self {
-        use pulldown_cmark::{Event, Options, Parser, TagEnd, TextMergeStream};
+        use pulldown_cmark::{CowStr, Event, Options, Parser, Tag, TagEnd, TextMergeStream};
         static CREDITS: &'static str = include_str!("../../CREDITS.md");
 
-        struct MarkdownParser {
+        #[derive(Debug, Default)]
+        struct MarkdownBuilder {
             nodes: Vec<CreditsNode>,
             spans: Vec<CreditsSpanBundle>,
             stack: Vec<TagEnd>,
         }
 
-        let parser =
-            TextMergeStream::new(Parser::new_ext(CREDITS, Options::empty()).map(|e| match e {
-                Event::SoftBreak => Event::Text(" ".into()),
-                e => e,
-            }));
-        let mut nodes = vec![];
-        let mut spans = vec![];
-        let mut stack = vec![];
-        for ev in parser {
-            // info!("cmark event {ev:#?}");
-            match ev {
-                Event::Start(tag) => {
-                    stack.push(tag.to_end());
-                }
-                Event::End(tag) => {
-                    assert_eq!(stack.pop(), Some(tag));
-                    if stack.is_empty() {
-                        let spans = std::mem::replace(&mut spans, Vec::new());
-                        let node = default();
-                        nodes.push(CreditsNode { node, spans });
+        impl MarkdownBuilder {
+            fn process_event(&mut self, ev: Event) {
+                match ev {
+                    Event::Start(tag) => {
+                        self.start_tag(tag);
                     }
+                    Event::End(tag) => {
+                        self.end_tag(tag);
+                    }
+                    Event::Text(t) => {
+                        self.text(t);
+                    }
+                    _ => {}
                 }
-                Event::Text(t) => {
-                    info!("stack at: {stack:#?}, text: {t:?}");
-                    let mut font_size = CREDITS_FONT_SIZE;
-                    for tag in &stack {
-                        use pulldown_cmark::TagEnd::*;
-                        match tag {
-                            &Heading(level) => {
-                                let scale = 1. + (7. - (level as u8 as f32)) / 4.;
-                                info!("scaling {font_size} * {scale} = {}", font_size * scale);
-                                font_size *= scale;
-                            }
-                            _ => {}
+            }
+
+            fn start_tag(&mut self, tag: Tag) {
+                // info!("push: {tag:?}");
+                self.stack.push(tag.to_end());
+            }
+
+            fn end_tag(&mut self, tag: TagEnd) {
+                // info!("pop: {tag:?}");
+                assert_eq!(self.stack.pop(), Some(tag));
+                match tag {
+                    TagEnd::Item => {
+                        self.take_spans(Node {
+                            margin: UiRect::left(Val::Px(15.)).with_top(Val::Px(2.)),
+                            ..default()
+                        });
+                    }
+                    TagEnd::BlockQuote(_) => {
+                        self.take_spans(Node {
+                            margin: UiRect::vertical(Val::Px(7.)).with_left(Val::Px(25.)),
+                            ..default()
+                        });
+                    }
+                    TagEnd::Paragraph if self.stack.is_empty() => {
+                        self.take_spans(Node {
+                            margin: UiRect::vertical(Val::Px(3.)),
+                            ..default()
+                        });
+                    }
+                    TagEnd::Heading(_) => {
+                        self.take_spans(Node {
+                            margin: UiRect::top(Val::Px(10.)).with_bottom(Val::Px(2.)),
+                            ..default()
+                        });
+                    }
+                    TagEnd::DefinitionListTitle => {
+                        self.take_spans(Node {
+                            margin: UiRect::top(Val::Px(5.)),
+                            ..default()
+                        });
+                    }
+                    TagEnd::DefinitionListDefinition => {
+                        self.take_spans(Node {
+                            margin: UiRect::left(Val::Px(10.)),
+                            ..default()
+                        });
+                    }
+                    _ if self.stack.is_empty() => {
+                        self.take_spans(Node::default());
+                    }
+                    _ => {}
+                }
+            }
+
+            fn take_spans(&mut self, node: Node) {
+                let spans = std::mem::replace(&mut self.spans, Vec::new());
+                if !spans.is_empty() {
+                    self.nodes.push(CreditsNode { node, spans });
+                }
+            }
+
+            fn text(&mut self, text: CowStr) {
+                // info!("stack at: {:#?}, text: {text:?}", self.stack);
+                let mut font_size = CREDITS_FONT_SIZE;
+                for tag in &self.stack {
+                    match tag {
+                        &TagEnd::Heading(level) => {
+                            let scale = 1. + (7. - (level as u8 as f32)) / 6.;
+                            // info!("scaling {font_size} * {scale} = {}", font_size * scale);
+                            font_size *= scale;
                         }
+                        &TagEnd::DefinitionListTitle => font_size *= 1.2,
+                        _ => {}
                     }
-                    spans.push(CreditsSpanBundle {
-                        text: TextSpan::new(t),
-                        color: DEFAULT_TEXT_COLOR,
-                        font: TextFont::from_font_size(font_size),
-                    });
                 }
-                _ => {}
+                self.spans.push(CreditsSpanBundle {
+                    text: TextSpan::new(text),
+                    color: DEFAULT_TEXT_COLOR,
+                    font: TextFont::from_font_size(font_size),
+                });
+            }
+
+            fn into_credits(self) -> Credits {
+                Credits { nodes: self.nodes }
             }
         }
-        // info!("credits: {nodes:#?}");
-        Credits { nodes }
+
+        let parser = TextMergeStream::new(
+            Parser::new_ext(
+                CREDITS,
+                Options::ENABLE_DEFINITION_LIST | Options::ENABLE_SMART_PUNCTUATION,
+            )
+            .map(|e| match e {
+                Event::SoftBreak => Event::Text(" ".into()),
+                e => e,
+            }),
+        );
+        let mut builder = MarkdownBuilder::default();
+        for ev in parser {
+            builder.process_event(ev);
+        }
+        builder.into_credits()
     }
 }
 
