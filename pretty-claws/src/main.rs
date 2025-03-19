@@ -18,8 +18,11 @@ use std::{
 use animation::{AnimatorPlugin, SavedAnimationNode};
 use bevy::{
     animation::{animated_field, AnimationTarget, AnimationTargetId, RepeatAnimation},
-    input::common_conditions::input_just_pressed,
-    picking::pointer::Location,
+    input::{
+        common_conditions::input_just_pressed,
+        mouse::{MouseScrollUnit, MouseWheel},
+    },
+    picking::{focus::HoverMap, pointer::Location},
     prelude::*,
     render::{
         camera::NormalizedRenderTarget,
@@ -99,6 +102,7 @@ fn main() {
         .add_observer(click_spin_fox_paws)
         .add_observer(gradient_drag::<Pointer<Click>>)
         .add_observer(gradient_drag::<Pointer<Move>>)
+        .add_observer(update_scroll_position_drag)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -124,6 +128,7 @@ fn main() {
                         show_color_caption,
                     )
                         .chain(),
+                    update_scroll_position,
                 ),
                 save_state,
             )
@@ -131,14 +136,14 @@ fn main() {
         )
         .add_systems(OnEnter(ColorState::Rainbow), apply_cubehelix)
         .add_systems(OnExit(ColorState::Rainbow), remove_cubehelix)
-        .add_systems(OnEnter(ColorState::Pick), show_pick_buttons)
-        .add_systems(OnExit(ColorState::Pick), remove_pick_buttons);
+        .add_systems(OnEnter(ColorState::Pick), show_pick_buttons);
 
     #[cfg(feature = "inspect")]
     app.add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new());
 
     for &state in ColorState::BUTTONS {
         app.add_systems(OnEnter(state), set_button_background);
+        app.add_systems(OnExit(state), clear_state_area);
     }
 
     #[cfg(target_family = "wasm")]
@@ -770,7 +775,7 @@ fn show_pick_buttons(
     }
 }
 
-fn remove_pick_buttons(q_area: Query<Entity, With<StateNodeArea>>, mut commands: Commands) {
+fn clear_state_area(q_area: Query<Entity, With<StateNodeArea>>, mut commands: Commands) {
     let Ok(area) = q_area.get_single() else {
         return;
     };
@@ -1469,13 +1474,114 @@ fn animate_cubehelix(
     );
 }
 
-fn apply_cubehelix(q_claws: Query<(Entity, &FoxClaw)>, mut commands: Commands) {
+const CREDITS_FONT_SIZE: f32 = 14.;
+const CREDITS_LINE_HEIGHT: f32 = CREDITS_FONT_SIZE + 1.;
+
+fn apply_cubehelix(
+    q_claws: Query<(Entity, &FoxClaw)>,
+    q_area: Query<Entity, With<StateNodeArea>>,
+    assets: Res<AppAssets>,
+    credits: Res<Credits>,
+    mut commands: Commands,
+) {
+    let Ok(area) = q_area.get_single() else {
+        return;
+    };
     for (entity, claw) in &q_claws {
         commands.entity(entity).insert(CubehelixClaw {
             phase: claw.phase(),
             ..default()
         });
     }
+    commands.entity(area).with_children(|parent| {
+        parent
+            .spawn(Node {
+                margin: UiRect::horizontal(Val::Px(7.)).with_bottom(Val::Px(5.)),
+                flex_direction: FlexDirection::Column,
+                align_self: AlignSelf::Stretch,
+                overflow: Overflow::scroll_y(),
+                ..default()
+            })
+            .with_children(|parent| {
+                for node in &credits.nodes {
+                    parent
+                        .spawn((node.node.clone(), PickingBehavior {
+                            should_block_lower: false,
+                            is_hoverable: true,
+                        }))
+                        .with_children(|parent| {
+                            parent
+                                .spawn((Text::default(), TextLayout::default(), PickingBehavior {
+                                    should_block_lower: false,
+                                    is_hoverable: true,
+                                }))
+                                .with_children(|parent| {
+                                    for bundle in &node.spans {
+                                        let mut bundle = bundle.clone();
+                                        bundle.font.font = assets.font.clone_weak();
+                                        parent.spawn(bundle);
+                                    }
+                                });
+                        });
+                }
+            });
+    });
+}
+
+fn update_scroll_position(
+    mut mouse_wheel_events: EventReader<MouseWheel>,
+    hover_map: Res<HoverMap>,
+    mut scrolled_node_query: Query<&mut ScrollPosition>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+) {
+    for mouse_wheel_event in mouse_wheel_events.read() {
+        let (mut dx, mut dy) = match mouse_wheel_event.unit {
+            MouseScrollUnit::Line => (
+                mouse_wheel_event.x * CREDITS_LINE_HEIGHT,
+                mouse_wheel_event.y * CREDITS_LINE_HEIGHT,
+            ),
+            MouseScrollUnit::Pixel => (mouse_wheel_event.x, mouse_wheel_event.y),
+        };
+
+        if keyboard_input.pressed(KeyCode::ControlLeft)
+            || keyboard_input.pressed(KeyCode::ControlRight)
+        {
+            std::mem::swap(&mut dx, &mut dy);
+        }
+
+        for (_pointer, pointer_map) in hover_map.iter() {
+            for (entity, _hit) in pointer_map.iter() {
+                if let Ok(mut scroll_position) = scrolled_node_query.get_mut(*entity) {
+                    scroll_position.offset_x -= dx;
+                    scroll_position.offset_y -= dy;
+                }
+            }
+        }
+    }
+}
+
+fn update_scroll_position_drag(
+    mut ev: Trigger<Pointer<Drag>>,
+    hover_map: Res<HoverMap>,
+    mut scrolled_node_query: Query<&mut ScrollPosition>,
+    q_window: Query<&Window>,
+) {
+    let NormalizedRenderTarget::Window(window) = ev.pointer_location.target else {
+        return;
+    };
+    let Ok(window) = q_window.get(window.entity()) else {
+        return;
+    };
+    let delta = ev.delta / window.scale_factor();
+    for (_pointer, pointer_map) in hover_map.iter() {
+        for (entity, _hit) in pointer_map.iter() {
+            if let Ok(mut scroll_position) = scrolled_node_query.get_mut(*entity) {
+                scroll_position.offset_x -= delta.x;
+                scroll_position.offset_y -= delta.y;
+            }
+        }
+    }
+    ev.propagate(false);
 }
 
 fn remove_cubehelix(q_claws: Query<Entity, With<CubehelixClaw>>, mut commands: Commands) {
@@ -1581,6 +1687,86 @@ fn asset_loader_update(
     }
 }
 
+#[derive(Debug, Clone, Reflect)]
+struct CreditsNode {
+    node: Node,
+    spans: Vec<CreditsSpanBundle>,
+}
+
+#[derive(Debug, Clone, Bundle, Reflect)]
+struct CreditsSpanBundle {
+    text: TextSpan,
+    color: TextColor,
+    font: TextFont,
+}
+
+#[derive(Resource, Reflect)]
+#[reflect(Resource)]
+struct Credits {
+    nodes: Vec<CreditsNode>,
+}
+
+impl Credits {
+    fn parse_credits() -> Self {
+        use pulldown_cmark::{Event, Options, Parser, TagEnd, TextMergeStream};
+        static CREDITS: &'static str = include_str!("../../CREDITS.md");
+
+        struct MarkdownParser {
+            nodes: Vec<CreditsNode>,
+            spans: Vec<CreditsSpanBundle>,
+            stack: Vec<TagEnd>,
+        }
+
+        let parser =
+            TextMergeStream::new(Parser::new_ext(CREDITS, Options::empty()).map(|e| match e {
+                Event::SoftBreak => Event::Text(" ".into()),
+                e => e,
+            }));
+        let mut nodes = vec![];
+        let mut spans = vec![];
+        let mut stack = vec![];
+        for ev in parser {
+            // info!("cmark event {ev:#?}");
+            match ev {
+                Event::Start(tag) => {
+                    stack.push(tag.to_end());
+                }
+                Event::End(tag) => {
+                    assert_eq!(stack.pop(), Some(tag));
+                    if stack.is_empty() {
+                        let spans = std::mem::replace(&mut spans, Vec::new());
+                        let node = default();
+                        nodes.push(CreditsNode { node, spans });
+                    }
+                }
+                Event::Text(t) => {
+                    info!("stack at: {stack:#?}, text: {t:?}");
+                    let mut font_size = CREDITS_FONT_SIZE;
+                    for tag in &stack {
+                        use pulldown_cmark::TagEnd::*;
+                        match tag {
+                            &Heading(level) => {
+                                let scale = 1. + (7. - (level as u8 as f32)) / 4.;
+                                info!("scaling {font_size} * {scale} = {}", font_size * scale);
+                                font_size *= scale;
+                            }
+                            _ => {}
+                        }
+                    }
+                    spans.push(CreditsSpanBundle {
+                        text: TextSpan::new(t),
+                        color: DEFAULT_TEXT_COLOR,
+                        font: TextFont::from_font_size(font_size),
+                    });
+                }
+                _ => {}
+            }
+        }
+        // info!("credits: {nodes:#?}");
+        Credits { nodes }
+    }
+}
+
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
@@ -1629,6 +1815,8 @@ fn setup(
         }
     };
     commands.insert_resource(LastPersistentState(last_state));
+
+    commands.insert_resource(Credits::parse_credits());
 
     commands.insert_resource({
         let fox_paw_images = FOX_PAW_IMAGES

@@ -36,6 +36,7 @@ bevy_pkv = { version = "~0.12", default-features = false, features = ["bevy", "s
 blake3 = { version = "~1.6.1", features = ["pure"] }
 getrandom = { version = "0.3.1", features = ["wasm_js"] }
 petgraph = { version = "0.6", default-features = false }
+pulldown-cmark = { version = "0.13.0", default-features = false }
 rand = "0.9.0"
 rand_chacha = "0.9.0"
 serde = "1.0.219"
