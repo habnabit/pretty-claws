@@ -1,5 +1,8 @@
 # pretty-claws
-© 2025 <_@habnab.it>
+
+fox paw image © 2025 <https://ko-fi.com/unholylykoi>
+
+© 2025 <mailto:_@habnab.it>
 
 ## EUROPEAN UNION PUBLIC LICENCE v. 1.2
 

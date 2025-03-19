@@ -80,6 +80,10 @@ fn main() {
         .register_type::<ColorsNodeArea>()
         .register_type::<ColorState>()
         .register_type::<ColorStateButton>()
+        .register_type::<Credits>()
+        .register_type::<CreditsLink>()
+        .register_type::<CreditsNode>()
+        .register_type::<CreditsSpanBundle>()
         .register_type::<CubehelixAnimationNode>()
         .register_type::<CubehelixClaw>()
         .register_type::<CubehelixRoot>()
@@ -184,6 +188,7 @@ const DEFAULT_BACKGROUND_COLOR: BackgroundColor = BackgroundColor(Color::hsla(0.
 const PICKER_BACKGROUND_COLOR: BackgroundColor = BackgroundColor(Color::hsla(0., 0., 0.9, 0.2));
 const DEFAULT_TEXT_COLOR: TextColor = TextColor(Color::hsl(0., 0., 0.1));
 const LIGHT_TEXT_COLOR: TextColor = TextColor(Color::hsl(0., 0., 0.9));
+const LINK_TEXT_COLOR: TextColor = TextColor(Color::hsl(240., 1., 0.4));
 const BUTTON_BORDER_COLOR: Color = Color::hsl(330., 1., 0.2);
 const STATE_BUTTON_SELECTED_BACKGROUND: Color = Color::hsla(330., 0.8, 0.9, 0.8);
 const STATE_BUTTON_BACKGROUND: Color = Color::hsla(0., 0., 0.7, 0.8);
@@ -1516,10 +1521,13 @@ fn apply_cubehelix(
                                     is_hoverable: true,
                                 }))
                                 .with_children(|parent| {
-                                    for bundle in &node.spans {
+                                    for (link, bundle) in &node.spans {
                                         let mut bundle = bundle.clone();
                                         bundle.font.font = assets.font.clone_weak();
-                                        parent.spawn(bundle);
+                                        let mut builder = parent.spawn(bundle);
+                                        if let Some(link) = link {
+                                            builder.insert(link.clone());
+                                        }
                                     }
                                 });
                         });
@@ -1687,10 +1695,13 @@ fn asset_loader_update(
     }
 }
 
+#[derive(Debug, Clone, Reflect, Component)]
+struct CreditsLink(String);
+
 #[derive(Debug, Clone, Reflect)]
 struct CreditsNode {
     node: Node,
-    spans: Vec<CreditsSpanBundle>,
+    spans: Vec<(Option<CreditsLink>, CreditsSpanBundle)>,
 }
 
 #[derive(Debug, Clone, Bundle, Reflect)]
@@ -1714,8 +1725,8 @@ impl Credits {
         #[derive(Debug, Default)]
         struct MarkdownBuilder {
             nodes: Vec<CreditsNode>,
-            spans: Vec<CreditsSpanBundle>,
-            stack: Vec<TagEnd>,
+            spans: Vec<(Option<CreditsLink>, CreditsSpanBundle)>,
+            stack: Vec<(TagEnd, Option<CreditsLink>)>,
         }
 
         impl MarkdownBuilder {
@@ -1736,12 +1747,19 @@ impl Credits {
 
             fn start_tag(&mut self, tag: Tag) {
                 // info!("push: {tag:?}");
-                self.stack.push(tag.to_end());
+                let link = match &tag {
+                    Tag::Link { dest_url, .. } => {
+                        info!("linking to {dest_url:?}");
+                        Some(CreditsLink(dest_url.to_string()))
+                    }
+                    _ => None,
+                };
+                self.stack.push((tag.to_end(), link));
             }
 
             fn end_tag(&mut self, tag: TagEnd) {
                 // info!("pop: {tag:?}");
-                assert_eq!(self.stack.pop(), Some(tag));
+                assert_eq!(self.stack.pop().map(|t| t.0), Some(tag));
                 match tag {
                     TagEnd::Item => {
                         self.take_spans(Node {
@@ -1795,8 +1813,10 @@ impl Credits {
 
             fn text(&mut self, text: CowStr) {
                 // info!("stack at: {:#?}, text: {text:?}", self.stack);
+                let mut color = DEFAULT_TEXT_COLOR;
                 let mut font_size = CREDITS_FONT_SIZE;
-                for tag in &self.stack {
+                let mut span_link = None;
+                for (tag, link) in &self.stack {
                     match tag {
                         &TagEnd::Heading(level) => {
                             let scale = 1. + (7. - (level as u8 as f32)) / 6.;
@@ -1804,14 +1824,18 @@ impl Credits {
                             font_size *= scale;
                         }
                         &TagEnd::DefinitionListTitle => font_size *= 1.2,
+                        &TagEnd::Link => color = LINK_TEXT_COLOR,
                         _ => {}
                     }
+                    if link.is_some() {
+                        span_link = link.as_ref();
+                    }
                 }
-                self.spans.push(CreditsSpanBundle {
+                self.spans.push((span_link.cloned(), CreditsSpanBundle {
                     text: TextSpan::new(text),
-                    color: DEFAULT_TEXT_COLOR,
+                    color,
                     font: TextFont::from_font_size(font_size),
-                });
+                }));
             }
 
             fn into_credits(self) -> Credits {
